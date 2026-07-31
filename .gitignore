@@ -1,0 +1,31 @@
+# Compiled class files
+target/
+
+# Log files
+*.log
+
+# Package Files
+*.jar
+*.war
+*.ear
+
+# Crash dumps
+hs_err_pid*
+
+# IDE files
+.idea/
+*.iml
+*.iws
+*.ipr
+.classpath
+.project
+.settings/
+nbproject/
+nb-configuration.xml
+
+# VS Code
+.vscode/
+
+# OS files
+Thumbs.db
+.DS_Store
