@@ -21,6 +21,8 @@ public final class CommandLineArgs {
     private boolean dryRun;
     private boolean assumeYes;
     private boolean help;
+    private boolean verbose;
+    private boolean registerAutoMount;
 
     public static CommandLineArgs parse(String[] args) {
         CommandLineArgs result = new CommandLineArgs();
@@ -55,6 +57,13 @@ public final class CommandLineArgs {
                 case "yes":
                 case "y":
                     result.assumeYes = true;
+                    break;
+                case "verbose":
+                case "v":
+                    result.verbose = true;
+                    break;
+                case "register-auto-mount":
+                    result.registerAutoMount = true;
                     break;
                 case "name":
                     result.name = inlineValue != null ? inlineValue : args[++i];
@@ -107,5 +116,13 @@ public final class CommandLineArgs {
 
     public boolean help() {
         return help;
+    }
+
+    public boolean verbose() {
+        return verbose;
+    }
+
+    public boolean registerAutoMount() {
+        return registerAutoMount;
     }
 }

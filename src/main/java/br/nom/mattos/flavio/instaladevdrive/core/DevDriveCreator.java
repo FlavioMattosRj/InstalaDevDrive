@@ -14,6 +14,8 @@ import java.nio.file.Paths;
  *       caminho do arquivo, nunca por numero.</li>
  *   <li>O cmdlet {@code Format-Volume -DevDrive} (modulo Storage, presente
  *       em qualquer Windows 11) formata a particao como Dev Drive.</li>
+ *   <li>{@link AutoMountScheduler} registra uma tarefa agendada que reanexa
+ *       o VHDX a cada boot, ja que o Windows nao o reconecta sozinho.</li>
  * </ol>
  *
  * Validacoes de seguranca aplicadas antes de qualquer alteracao no sistema:
@@ -69,7 +71,7 @@ public final class DevDriveCreator {
 
         Path directory = requestedDirectory != null
                 ? requestedDirectory
-                : Paths.get(System.getProperty("user.home"), "DevDrive");
+                : Paths.get("C:\\DevDrive");
         Path vhdPath = directory.resolve(name + ".vhdx");
 
         char letter = requestedLetter != null ? requestedLetter : DriveLetterFinder.findFreeLetter();
@@ -169,6 +171,18 @@ public final class DevDriveCreator {
                             + formatResult.stdout() + formatResult.stderr());
         }
 
+        ProcessResult autoMountResult = AutoMountScheduler.register(plan.label(), plan.vhdPath());
+        if (!autoMountResult.success()) {
+            // O disco ja foi criado e formatado com sucesso - nao ha motivo
+            // para desfazer isso por causa de uma etapa de conveniencia.
+            throw new IllegalStateException(
+                    "O Dev Drive foi criado e formatado com sucesso, mas nao foi possivel registrar a remontagem "
+                            + "automatica no boot (Agendador de Tarefas), codigo " + autoMountResult.exitCode() + ".\nSaida:\n"
+                            + autoMountResult.stdout() + autoMountResult.stderr()
+                            + "\nVoce pode tentar novamente depois com --register-auto-mount --name " + plan.label()
+                            + ", sem precisar recriar o disco.");
+        }
+
         return formatResult;
     }
 
@@ -178,7 +192,7 @@ public final class DevDriveCreator {
      * evita o principal risco classico do DISKPART: atingir por engano um
      * disco fisico existente.
      */
-    private String buildCreateScript(Plan plan) {
+    String buildCreateScript(Plan plan) {
         String path = plan.vhdPath().toAbsolutePath().toString();
         long sizeMb = (plan.sizeBytes() + MEGABYTE - 1) / MEGABYTE;
 
@@ -193,7 +207,7 @@ public final class DevDriveCreator {
         return script.toString();
     }
 
-    private String buildFormatCommand(Plan plan) {
+    String buildFormatCommand(Plan plan) {
         String escapedLabel = plan.label().replace("'", "''");
         return "$ErrorActionPreference = 'Stop'" + System.lineSeparator()
                 + "try {" + System.lineSeparator()
