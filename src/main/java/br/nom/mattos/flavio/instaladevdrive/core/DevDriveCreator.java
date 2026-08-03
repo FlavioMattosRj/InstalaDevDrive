@@ -5,6 +5,7 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Arrays;
 
 /**
  * Orquestra a criacao de um Dev Drive sem depender do modulo Hyper-V:
@@ -184,6 +185,30 @@ public final class DevDriveCreator {
         }
 
         return formatResult;
+    }
+
+    /**
+     * Consulta, via {@code fsutil devdrv query}, se a unidade esta de fato
+     * ativa como Dev Drive nesta maquina. Sem a politica correspondente
+     * liberada pela organizacao, o volume formatado com
+     * {@code Format-Volume -DevDrive} continua existindo, mas funciona
+     * apenas como um ReFS comum dentro do VHDX - sem os ganhos de
+     * desempenho e a isencao de antivirus do Dev Drive.
+     */
+    public ProcessResult checkDevDriveStatus(Plan plan) {
+        return ProcessRunner.execute(Arrays.asList("fsutil.exe", "devdrv", "query", plan.driveLetter() + ":"));
+    }
+
+    /**
+     * Interpreta a saida de {@link #checkDevDriveStatus(Plan)}: o fsutil
+     * menciona "developer volume" tanto quando o volume e um Dev Drive
+     * confiavel quanto quando e um Dev Drive nao confiavel - em ambos os
+     * casos o recurso esta ativo nesta maquina. Qualquer outra saida indica
+     * que o volume nao foi reconhecido como Dev Drive (recurso desativado
+     * por politica de grupo/MDM da organizacao).
+     */
+    public static boolean isDevDriveActive(ProcessResult statusResult) {
+        return statusResult.success() && statusResult.stdout().toLowerCase().contains("developer volume");
     }
 
     /**

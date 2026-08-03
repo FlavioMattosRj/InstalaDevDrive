@@ -101,6 +101,22 @@ public class InstalaDevDrive {
         }
 
         System.out.println("Dev Drive criado com sucesso, incluindo remontagem automatica no boot.");
+
+        System.out.println();
+        System.out.println("Verificando se o Dev Drive esta ativo nesta maquina (fsutil devdrv query)...");
+        ProcessResult statusResult = creator.checkDevDriveStatus(plan);
+        System.out.print(statusResult.stdout());
+        System.out.print(statusResult.stderr());
+
+        if (DevDriveCreator.isDevDriveActive(statusResult)) {
+            System.out.println("Dev Drive: ATIVO nesta maquina.");
+        } else {
+            System.out.println("Dev Drive: INATIVO nesta maquina (a unidade " + plan.driveLetter()
+                    + ": existe, mas funciona apenas como um volume ReFS comum, sem os beneficios de Dev Drive).");
+            System.out.println("Provavel bloqueio por politica de grupo/MDM da organizacao. "
+                    + "Entre em contato com a unidade organizacional responsavel (TI/Seguranca da Informacao) "
+                    + "para solicitar autorizacao de uso do Dev Drive nesta maquina.");
+        }
     }
 
     /**
