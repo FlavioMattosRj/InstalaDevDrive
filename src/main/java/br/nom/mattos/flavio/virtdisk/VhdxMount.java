@@ -63,12 +63,14 @@ public final class VhdxMount {
     /** Anexa o VHDX de forma permanente: sobrevive ao processo e a reboots do Windows. */
     public synchronized void mountPermanently() {
         HANDLE handle = open();
-        try {
-            attach(handle, ATTACH_FLAGS_PERMANENT_AT_BOOT);
-        } finally {
-            // PERMANENT_LIFETIME desacopla o disco do handle -- fechar aqui nao desanexa.
-            Kernel32.INSTANCE.CloseHandle(handle);
-        }
+        attach(handle, ATTACH_FLAGS_PERMANENT_AT_BOOT);
+        // So chega aqui se attach() teve sucesso - em caso de falha, attach()
+        // ja fecha o handle antes de lancar (ver abaixo). Fechar de novo aqui
+        // seria um CloseHandle duplicado: a Microsoft documenta isso como
+        // perigoso, podendo fechar um handle nao relacionado que teve o
+        // mesmo valor reciclado nesse meio-tempo.
+        // PERMANENT_LIFETIME desacopla o disco do handle -- fechar aqui nao desanexa.
+        Kernel32.INSTANCE.CloseHandle(handle);
     }
 
     /** Desanexa o VHDX -- funciona mesmo se o attach foi feito por outra instancia/execucao (ex.: mountPermanently). */

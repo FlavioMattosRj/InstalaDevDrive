@@ -91,6 +91,8 @@ public final class DevDriveCreator {
     }
 
     public Plan resolvePlan(String name, String sizeText, Character requestedLetter, Path requestedDirectory) {
+        validateName(name);
+
         long sizeBytes = SizeParser.parseToBytes(sizeText);
         SizeParser.validateMinimum(sizeBytes);
 
@@ -102,6 +104,26 @@ public final class DevDriveCreator {
         char letter = requestedLetter != null ? requestedLetter : DriveLetterFinder.findFreeLetter();
 
         return new Plan(vhdPath, letter, sizeBytes, name);
+    }
+
+    /**
+     * Garante que --name e apenas um nome de arquivo simples, nunca um
+     * caminho. Sem essa checagem, um valor como "C:\Windows\System32\x" ou
+     * "..\..\Windows\System32\x" faz {@code directory.resolve(...)} ignorar
+     * completamente o diretorio de destino (--path) e apontar para
+     * qualquer lugar do disco - e como o processo roda elevado, o VHDX
+     * seria criado ali com privilegios de Administrador.
+     */
+    private static void validateName(String name) {
+        if (name.isEmpty()) {
+            throw new IllegalArgumentException("--name nao pode ser vazio.");
+        }
+
+        Path asPath = Paths.get(name);
+        if (asPath.isAbsolute() || asPath.getNameCount() != 1) {
+            throw new IllegalArgumentException(
+                    "--name deve ser apenas um nome de arquivo, sem separadores de caminho: '" + name + "'.");
+        }
     }
 
     /**

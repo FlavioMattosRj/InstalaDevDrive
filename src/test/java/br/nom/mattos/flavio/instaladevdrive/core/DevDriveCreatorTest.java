@@ -273,6 +273,39 @@ class DevDriveCreatorTest {
         assertTrue(DriveLetterFinder.isLetterFree(plan.driveLetter()));
     }
 
+    @Test
+    void resolvePlanRejeitaNomeVazio() {
+        assertThrows(IllegalArgumentException.class, () -> creator.resolvePlan("", "50GB", 'D', null));
+    }
+
+    @Test
+    void resolvePlanRejeitaNomeComCaminhoAbsoluto() {
+        // Sem essa validacao, Path.resolve() ignora completamente o
+        // diretorio de destino quando o "nome" e um caminho absoluto -
+        // criando o VHDX em qualquer lugar do disco, como Administrador.
+        assertThrows(IllegalArgumentException.class,
+                () -> creator.resolvePlan("C:\\Windows\\System32\\evil", "50GB", 'D', null));
+    }
+
+    @Test
+    void resolvePlanRejeitaNomeComTravessiaDeDiretorio() {
+        assertThrows(IllegalArgumentException.class,
+                () -> creator.resolvePlan("..\\..\\Windows\\System32\\evil", "50GB", 'D', null));
+    }
+
+    @Test
+    void resolvePlanRejeitaNomeComBarra() {
+        assertThrows(IllegalArgumentException.class, () -> creator.resolvePlan("sub/dir", "50GB", 'D', null));
+        assertThrows(IllegalArgumentException.class, () -> creator.resolvePlan("sub\\dir", "50GB", 'D', null));
+    }
+
+    @Test
+    void resolvePlanAceitaNomeSimples() {
+        DevDriveCreator.Plan plan = creator.resolvePlan("Meu-Dev_Drive 2", "50GB", 'D', null);
+
+        assertEquals(Paths.get("C:\\DevDrive", "Meu-Dev_Drive 2.vhdx"), plan.vhdPath());
+    }
+
     // ---------------------------------------------------------------
     // validatePlan
     // ---------------------------------------------------------------
