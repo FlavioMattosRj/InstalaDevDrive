@@ -16,12 +16,18 @@ import static org.junit.jupiter.api.Assertions.assertSame;
  */
 class PowerShellRunnerTest {
 
+    // Caminho falso usado nestes testes: eles verificam apenas a MONTAGEM da
+    // lista de argumentos, nao a resolucao real do executavel (feita por
+    // TrustedExecutables, que chama a API do Windows e so pode ser exercitada
+    // nessa plataforma).
+    private static final String FAKE_EXECUTABLE = "C:\\Fake\\powershell.exe";
+
     @Test
     void montaFlagsFixasNaOrdemEsperada() {
-        List<String> args = PowerShellRunner.buildArgs("Write-Output 1");
+        List<String> args = PowerShellRunner.buildArgs(FAKE_EXECUTABLE, "Write-Output 1");
 
         assertEquals(7, args.size(), "Numero de argumentos mudou; cheque se alguma flag foi perdida/duplicada");
-        assertEquals("powershell.exe", args.get(0));
+        assertEquals(FAKE_EXECUTABLE, args.get(0));
         assertEquals("-NoProfile", args.get(1));
         assertEquals("-NonInteractive", args.get(2));
         assertEquals("-ExecutionPolicy", args.get(3));
@@ -33,7 +39,7 @@ class PowerShellRunnerTest {
     @Test
     void comandoEhPassadoComoUmUnicoArgumentoMesmoComEspacos() {
         String command = "Get-ChildItem -Path 'C:\\Program Files'";
-        List<String> args = PowerShellRunner.buildArgs(command);
+        List<String> args = PowerShellRunner.buildArgs(FAKE_EXECUTABLE, command);
 
         // Erro classico: se o comando fosse dividido por espaco em multiplos
         // argumentos (em vez de um unico elemento da lista), o ProcessBuilder
@@ -45,7 +51,7 @@ class PowerShellRunnerTest {
     @Test
     void comandoComAspasDuplasNaoEhAlterado() {
         String command = "Write-Output \"ola mundo\"";
-        List<String> args = PowerShellRunner.buildArgs(command);
+        List<String> args = PowerShellRunner.buildArgs(FAKE_EXECUTABLE, command);
 
         assertSame(command, args.get(args.size() - 1), "buildArgs nao deve reescrever/escapar o comando recebido");
     }
@@ -56,7 +62,7 @@ class PowerShellRunnerTest {
                 + "try {" + System.lineSeparator()
                 + "    Write-Output 'FORMAT_OK'" + System.lineSeparator()
                 + "}";
-        List<String> args = PowerShellRunner.buildArgs(command);
+        List<String> args = PowerShellRunner.buildArgs(FAKE_EXECUTABLE, command);
 
         assertEquals(command, args.get(args.size() - 1));
         assertEquals(1, args.stream().filter(a -> a.contains("FORMAT_OK")).count(),
@@ -65,7 +71,7 @@ class PowerShellRunnerTest {
 
     @Test
     void comandoVazioNaoQuebraAMontagemDosArgumentos() {
-        List<String> args = PowerShellRunner.buildArgs("");
+        List<String> args = PowerShellRunner.buildArgs(FAKE_EXECUTABLE, "");
 
         assertEquals(7, args.size());
         assertEquals("", args.get(6));
@@ -74,7 +80,7 @@ class PowerShellRunnerTest {
     @Test
     void comandoComPontoEVirgulaEPipeContinuaLiteral() {
         String command = "Get-Process | Where-Object { $_.Id -eq 1 }; exit 0";
-        List<String> args = PowerShellRunner.buildArgs(command);
+        List<String> args = PowerShellRunner.buildArgs(FAKE_EXECUTABLE, command);
 
         assertEquals(command, args.get(args.size() - 1));
     }

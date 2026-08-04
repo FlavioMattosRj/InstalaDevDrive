@@ -34,7 +34,7 @@ public final class PowerShellRunner {
      * final via Format-Volume).
      */
     public static ProcessResult runCommand(String command) {
-        List<String> args = buildArgs(command);
+        List<String> args = buildArgs(TrustedExecutables.powershellPath(), command);
         if (verbose) {
             logCommand(command);
         }
@@ -44,11 +44,13 @@ public final class PowerShellRunner {
     /**
      * Monta a lista de argumentos do processo powershell.exe. Extraido como
      * metodo separado (visivel para testes) para permitir verificar a
-     * geracao do comando sem precisar executar um processo real.
+     * geracao do comando sem precisar executar um processo real nem
+     * resolver o caminho real de System32 - por isso recebe o caminho do
+     * executavel como parametro em vez de resolve-lo aqui.
      */
-    static List<String> buildArgs(String command) {
+    static List<String> buildArgs(String executablePath, String command) {
         return Arrays.asList(
-                "powershell.exe",
+                executablePath,
                 "-NoProfile",
                 "-NonInteractive",
                 "-ExecutionPolicy", "Bypass",
