@@ -57,7 +57,7 @@ public final class DevDriveCreator {
      * para confirmar a formatacao, em vez de confiar apenas no codigo de
      * saida do processo.
      */
-    static final String FORMAT_SUCCESS_MARKER = "DEVDRIVE_FORMATADO_COM_SUCESSO";
+    static final String FORMAT_SUCCESS_MARKER = "Dev Drive formatado com sucesso";
 
     public static final class Plan {
 
