@@ -75,10 +75,11 @@ class CommandLineArgsTest {
     }
 
     @Test
-    void letraUsaApenasOPrimeiroCaractereDoValor() {
-        CommandLineArgs cli = CommandLineArgs.parse(new String[]{"--letter", "DX"});
-
-        assertEquals(Character.valueOf('D'), cli.letter());
+    void rejeitaLetraComMaisDeUmCaractere() {
+        // Antes, "--letter DX" truncava silenciosamente para 'D', ignorando
+        // o resto do valor sem avisar o usuario. Agora e um erro de uso.
+        assertThrows(IllegalArgumentException.class,
+                () -> CommandLineArgs.parse(new String[]{"--letter", "DX"}));
     }
 
     @Test
@@ -100,13 +101,13 @@ class CommandLineArgsTest {
     }
 
     @Test
-    void faltaDeValorAposFlagQueEsperaArgumentoLancaExcecao() {
-        // Comportamento atual: --name no ultimo argumento, sem valor a
-        // seguir, estoura ArrayIndexOutOfBoundsException em vez de uma
-        // mensagem de erro amigavel. Teste documenta o comportamento hoje;
-        // considerar melhorar a mensagem de erro no parser futuramente.
-        assertThrows(ArrayIndexOutOfBoundsException.class,
-                () -> CommandLineArgs.parse(new String[]{"--name"}));
+    void faltaDeValorAposFlagQueEsperaArgumentoLancaErroDeUsoClaro() {
+        // Antes, --name no ultimo argumento sem valor a seguir estourava
+        // ArrayIndexOutOfBoundsException em vez de uma mensagem amigavel.
+        assertThrows(IllegalArgumentException.class, () -> CommandLineArgs.parse(new String[]{"--name"}));
+        assertThrows(IllegalArgumentException.class, () -> CommandLineArgs.parse(new String[]{"--size"}));
+        assertThrows(IllegalArgumentException.class, () -> CommandLineArgs.parse(new String[]{"--letter"}));
+        assertThrows(IllegalArgumentException.class, () -> CommandLineArgs.parse(new String[]{"--path"}));
     }
 
     @Test

@@ -62,20 +62,25 @@ public final class CommandLineArgs {
                     result.verbose = true;
                     break;
                 case "name":
+                    requireValuePresent(args, i, inlineValue, "name");
                     result.name = inlineValue != null ? inlineValue : args[++i];
                     break;
                 case "size":
+                    requireValuePresent(args, i, inlineValue, "size");
                     result.size = inlineValue != null ? inlineValue : args[++i];
                     break;
                 case "letter": {
+                    requireValuePresent(args, i, inlineValue, "letter");
                     String value = inlineValue != null ? inlineValue : args[++i];
-                    if (value.isEmpty()) {
-                        throw new IllegalArgumentException("Valor vazio para --letter");
+                    if (value.length() != 1) {
+                        throw new IllegalArgumentException(
+                                "--letter deve ter exatamente um caractere: '" + value + "'.");
                     }
                     result.letter = Character.toUpperCase(value.charAt(0));
                     break;
                 }
                 case "path":
+                    requireValuePresent(args, i, inlineValue, "path");
                     result.directory = Paths.get(inlineValue != null ? inlineValue : args[++i]);
                     break;
                 default:
@@ -84,6 +89,18 @@ public final class CommandLineArgs {
         }
 
         return result;
+    }
+
+    /**
+     * Flags como --name esperam um valor logo em seguida (a nao ser que
+     * venha embutido via --name=valor). Sem essa checagem, uma flag no
+     * ultimo argumento sem valor estourava ArrayIndexOutOfBoundsException
+     * em vez de um erro de uso claro.
+     */
+    private static void requireValuePresent(String[] args, int currentIndex, String inlineValue, String flagName) {
+        if (inlineValue == null && currentIndex + 1 >= args.length) {
+            throw new IllegalArgumentException("Falta o valor de --" + flagName + ".");
+        }
     }
 
     public String name() {
