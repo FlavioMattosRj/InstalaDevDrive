@@ -33,17 +33,31 @@ import java.nio.file.Paths;
  * a letra de unidade nao pode ser a unidade do sistema, nem A/B, nem uma
  * letra ja ocupada; o arquivo VHDX de destino nao pode ja existir; o
  * caminho nao pode conter aspas (usadas para delimitar o caminho no script
- * do DISKPART). Apos cada etapa, o resultado e confirmado por uma evidencia
- * real do sistema de arquivos (a letra passou a existir), em vez de confiar
- * apenas no texto (que pode estar em outro idioma) impresso pelo DISKPART.
- * Em qualquer falha, e feita uma tentativa de reversao (desanexar o disco
- * virtual e apagar o arquivo).
+ * do DISKPART). Como ha um prompt de confirmacao (tempo de espera
+ * indeterminado) entre essa validacao e a execucao real, tanto a letra
+ * quanto o caminho do VHDX sao revalidados de novo imediatamente antes de
+ * agir, para reduzir ao maximo a janela de corrida. Apos cada etapa, o
+ * resultado e confirmado por uma evidencia real do sistema de arquivos (a
+ * letra passou a existir), em vez de confiar apenas no texto (que pode
+ * estar em outro idioma) impresso pelo DISKPART. Em qualquer falha, e
+ * feita uma tentativa de reversao (desanexar o disco virtual e apagar o
+ * arquivo) - mas somente se esta execucao confirmou ter sido ela mesma
+ * quem criou o arquivo; um arquivo que apareceu no caminho por qualquer
+ * outro motivo nunca e apagado automaticamente.
  *
  * @author flavio mattos
  */
 public final class DevDriveCreator {
 
     private static final long MEGABYTE = 1024L * 1024;
+
+    /**
+     * Marcador impresso pelo script PowerShell de formatacao quando o
+     * Format-Volume termina com sucesso. E o que {@link #execute(Plan)} usa
+     * para confirmar a formatacao, em vez de confiar apenas no codigo de
+     * saida do processo.
+     */
+    static final String FORMAT_SUCCESS_MARKER = "DEVDRIVE_FORMATADO_COM_SUCESSO";
 
     public static final class Plan {
 
@@ -153,27 +167,42 @@ public final class DevDriveCreator {
             throw new UncheckedIOException("Nao foi possivel criar o diretorio de destino", e);
         }
 
-        // Revalida a letra imediatamente antes de agir, reduzindo ao maximo a
-        // janela de corrida entre a checagem e a execucao real.
+        // Revalida a letra e o caminho do VHDX imediatamente antes de agir,
+        // reduzindo ao maximo a janela de corrida entre a validacao inicial
+        // (antes do prompt de confirmacao) e a execucao real.
         if (!DriveLetterFinder.isLetterFree(plan.driveLetter())) {
             throw new IllegalStateException(
                     "A letra " + plan.driveLetter() + ": passou a estar em uso. Tente novamente com outra letra.");
         }
+        if (Files.exists(plan.vhdPath())) {
+            throw new IllegalStateException(
+                    "O arquivo " + plan.vhdPath() + " passou a existir entre a validacao e a execucao. "
+                            + "Verifique se outro processo criou esse arquivo e tente novamente.");
+        }
 
         ProcessResult createResult = DiskpartRunner.runScript(buildCreateScript(plan));
 
-        if (!createResult.success() || !Files.exists(plan.vhdPath())) {
-            rollback(plan);
+        // So consideramos o VHDX "nosso" se o DISKPART reportou sucesso E o
+        // arquivo realmente existe logo em seguida - nunca so pela presenca
+        // do arquivo, que tambem seria verdade se algo mais o tivesse criado
+        // na fresta entre a revalidacao acima e esta linha.
+        boolean vhdCreatedByThisRun = createResult.success() && Files.exists(plan.vhdPath());
+
+        if (!vhdCreatedByThisRun) {
+            String avisoArquivoOrfao = Files.exists(plan.vhdPath())
+                    ? "\nAviso: ha um arquivo em " + plan.vhdPath() + " que esta execucao nao confirmou ter "
+                            + "criado; ele NAO foi apagado automaticamente. Verifique manualmente antes de tentar de novo."
+                    : "";
             throw new IllegalStateException(
                     "Falha ao criar o disco virtual com o DISKPART (codigo "
                             + createResult.exitCode() + ").\nSaida do DISKPART:\n"
-                            + createResult.stdout() + createResult.stderr());
+                            + createResult.stdout() + createResult.stderr() + avisoArquivoOrfao);
         }
 
         try {
             new VhdxMount(plan.vhdPath().toAbsolutePath().toString()).mountPermanently();
         } catch (VirtualDiskException e) {
-            rollback(plan);
+            rollback(plan, vhdCreatedByThisRun);
             throw new IllegalStateException(
                     "Falha ao anexar o disco virtual de forma permanente: " + e.getMessage(), e);
         }
@@ -182,7 +211,7 @@ public final class DevDriveCreator {
         boolean letterAppeared = !DriveLetterFinder.isLetterFree(plan.driveLetter());
 
         if (!partitionResult.success() || !letterAppeared) {
-            rollback(plan);
+            rollback(plan, vhdCreatedByThisRun);
             throw new IllegalStateException(
                     "Falha ao particionar o disco virtual ou atribuir a letra de unidade (codigo "
                             + partitionResult.exitCode() + ").\nSaida do DISKPART:\n"
@@ -191,8 +220,8 @@ public final class DevDriveCreator {
 
         ProcessResult formatResult = PowerShellRunner.runCommand(buildFormatCommand(plan));
 
-        if (!formatResult.success() || !formatResult.stdout().contains("FORMAT_OK")) {
-            rollback(plan);
+        if (!formatResult.success() || !formatResult.stdout().contains(FORMAT_SUCCESS_MARKER)) {
+            rollback(plan, vhdCreatedByThisRun);
             throw new IllegalStateException(
                     "Falha ao formatar a unidade como Dev Drive (codigo " + formatResult.exitCode() + ").\nSaida:\n"
                             + formatResult.stdout() + formatResult.stderr());
@@ -239,7 +268,7 @@ public final class DevDriveCreator {
                 + "try {" + System.lineSeparator()
                 + "    Format-Volume -DriveLetter '" + plan.driveLetter() + "' -FileSystem ReFS -DevDrive "
                 + "-NewFileSystemLabel '" + escapedLabel + "' -Confirm:$false | Out-Null" + System.lineSeparator()
-                + "    Write-Output 'FORMAT_OK'" + System.lineSeparator()
+                + "    Write-Output '" + FORMAT_SUCCESS_MARKER + "'" + System.lineSeparator()
                 + "    exit 0" + System.lineSeparator()
                 + "} catch {" + System.lineSeparator()
                 + "    Write-Error $_.Exception.Message" + System.lineSeparator()
@@ -252,8 +281,17 @@ public final class DevDriveCreator {
      * {@link VhdxMount#dismount()}, que funciona mesmo que a anexacao nunca
      * tenha chegado a acontecer) e apaga o arquivo incompleto. Nunca lanca
      * excecao, para nao mascarar o erro original que motivou a chamada.
+     *
+     * So opera se {@code vhdCreatedByThisRun} for true - ou seja, se esta
+     * execucao ja confirmou (em {@link #execute(Plan)}) ter sido ela mesma
+     * quem criou o arquivo. Isso evita que uma falha em qualquer etapa
+     * acabe apagando um arquivo que so por coincidencia esta no mesmo
+     * caminho, mas que nunca foi criado por esta execucao.
      */
-    private void rollback(Plan plan) {
+    private void rollback(Plan plan, boolean vhdCreatedByThisRun) {
+        if (!vhdCreatedByThisRun) {
+            return;
+        }
         if (Files.exists(plan.vhdPath())) {
             try {
                 new VhdxMount(plan.vhdPath().toAbsolutePath().toString()).dismount();

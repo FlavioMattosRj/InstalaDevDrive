@@ -60,12 +60,12 @@ class PowerShellRunnerTest {
     void comandoMultilinhaPermaneceIntactoComoUmUnicoArgumento() {
         String command = "$ErrorActionPreference = 'Stop'" + System.lineSeparator()
                 + "try {" + System.lineSeparator()
-                + "    Write-Output 'FORMAT_OK'" + System.lineSeparator()
+                + "    Write-Output '" + DevDriveCreator.FORMAT_SUCCESS_MARKER + "'" + System.lineSeparator()
                 + "}";
         List<String> args = PowerShellRunner.buildArgs(FAKE_EXECUTABLE, command);
 
         assertEquals(command, args.get(args.size() - 1));
-        assertEquals(1, args.stream().filter(a -> a.contains("FORMAT_OK")).count(),
+        assertEquals(1, args.stream().filter(a -> a.contains(DevDriveCreator.FORMAT_SUCCESS_MARKER)).count(),
                 "O script inteiro deve chegar como um unico argumento, nao fatiado");
     }
 

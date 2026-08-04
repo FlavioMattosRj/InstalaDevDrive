@@ -44,7 +44,8 @@ class DevDriveCreatorTest {
         assertTrue(command.contains("-DevDrive"), "Flag -DevDrive ausente");
         assertTrue(command.contains("-NewFileSystemLabel 'DevDrive'"), "Rotulo ausente/incorreto");
         assertTrue(command.contains("-Confirm:$false"), "Sem -Confirm:$false o comando pode ficar preso esperando confirmacao interativa");
-        assertTrue(command.contains("Write-Output 'FORMAT_OK'"), "Marcador FORMAT_OK e usado pelo chamador para confirmar sucesso");
+        assertTrue(command.contains("Write-Output '" + DevDriveCreator.FORMAT_SUCCESS_MARKER + "'"),
+                "Marcador de sucesso e usado pelo chamador para confirmar a formatacao");
         assertTrue(command.contains("} catch {"), "Deve haver tratamento de erro");
         assertTrue(command.contains("exit 1"), "Caminho de erro deve sinalizar exit code != 0");
         assertEquals(1, countOccurrences(command, "Format-Volume"), "Deve haver exatamente um comando Format-Volume");
