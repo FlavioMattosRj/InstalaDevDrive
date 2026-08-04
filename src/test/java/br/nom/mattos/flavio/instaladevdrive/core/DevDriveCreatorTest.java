@@ -123,11 +123,11 @@ class DevDriveCreatorTest {
     }
 
     // ---------------------------------------------------------------
-    // buildCreateScript (script do DISKPART)
+    // buildCreateScript (script do DISKPART que so cria o arquivo VHDX)
     // ---------------------------------------------------------------
 
     @Test
-    void scriptDeCriacaoContemComandosNaOrdemCorreta() {
+    void scriptDeCriacaoContemApenasCreateVdiskEExit() {
         Path vhd = Paths.get("C:\\DevDrive\\DevDrive.vhdx");
         DevDriveCreator.Plan plan = new DevDriveCreator.Plan(vhd, 'D', 50L * 1024 * 1024 * 1024, "DevDrive");
 
@@ -136,11 +136,22 @@ class DevDriveCreatorTest {
 
         String path = vhd.toAbsolutePath().toString();
         assertEquals("create vdisk file=\"" + path + "\" maximum=51200 type=expandable", lines[0]);
-        assertEquals("select vdisk file=\"" + path + "\"", lines[1]);
-        assertEquals("attach vdisk", lines[2]);
-        assertEquals("create partition primary", lines[3]);
-        assertEquals("assign letter=D", lines[4]);
-        assertEquals("exit", lines[5]);
+        assertEquals("exit", lines[1]);
+        assertEquals(2, lines.length, "Script de criacao nao deve anexar, particionar nem atribuir letra - isso e feito depois, separadamente");
+    }
+
+    @Test
+    void scriptDeCriacaoNaoAnexaNemParticionaNemAtribuiLetra() {
+        // A anexacao agora e feita pela API nativa (VhdxMount.mountPermanently()),
+        // nao mais pelo DISKPART - documenta esse contrato para nao regredir
+        // sem querer para o mecanismo antigo (attach vdisk + tarefa agendada).
+        DevDriveCreator.Plan plan = plan("DevDrive");
+
+        String script = creator.buildCreateScript(plan);
+
+        assertTrue(!script.contains("attach vdisk"));
+        assertTrue(!script.contains("create partition"));
+        assertTrue(!script.contains("assign letter"));
     }
 
     @Test
@@ -154,21 +165,71 @@ class DevDriveCreatorTest {
     }
 
     @Test
-    void discoESempreSelecionadoPorCaminhoDeArquivoNuncaPorNumero() {
+    void discoDeCriacaoNuncaESelecionadoPorNumero() {
         DevDriveCreator.Plan plan = plan("DevDrive");
 
         String script = creator.buildCreateScript(plan);
+
+        assertTrue(!script.matches("(?s).*select disk \\d+.*"));
+    }
+
+    @Test
+    void caminhoComEspacosPermaneceEntreAspasNoScriptDeCriacao() {
+        Path vhd = Paths.get("C:\\Dev Drive Com Espacos\\DevDrive.vhdx");
+        DevDriveCreator.Plan plan = new DevDriveCreator.Plan(vhd, 'D', 50L * 1024 * 1024 * 1024, "DevDrive");
+
+        String script = creator.buildCreateScript(plan);
+
+        String path = vhd.toAbsolutePath().toString();
+        assertTrue(script.contains("\"" + path + "\""), "Caminho com espacos deve permanecer totalmente entre aspas para o DISKPART nao dividi-lo");
+    }
+
+    // ---------------------------------------------------------------
+    // buildPartitionScript (script do DISKPART que particiona um disco
+    // ja anexado via VhdxMount e atribui a letra de unidade)
+    // ---------------------------------------------------------------
+
+    @Test
+    void scriptDeParticaoContemComandosNaOrdemCorreta() {
+        Path vhd = Paths.get("C:\\DevDrive\\DevDrive.vhdx");
+        DevDriveCreator.Plan plan = new DevDriveCreator.Plan(vhd, 'D', 50L * 1024 * 1024 * 1024, "DevDrive");
+
+        String script = creator.buildPartitionScript(plan);
+        String[] lines = script.split(System.lineSeparator());
+
+        String path = vhd.toAbsolutePath().toString();
+        assertEquals("select vdisk file=\"" + path + "\"", lines[0]);
+        assertEquals("create partition primary", lines[1]);
+        assertEquals("assign letter=D", lines[2]);
+        assertEquals("exit", lines[3]);
+        assertEquals(4, lines.length);
+    }
+
+    @Test
+    void scriptDeParticaoNaoRecriaOArquivoVhdx() {
+        DevDriveCreator.Plan plan = plan("DevDrive");
+
+        String script = creator.buildPartitionScript(plan);
+
+        assertTrue(!script.contains("create vdisk"), "Script de particao opera sobre um disco ja criado/anexado; nao deve recriar o arquivo");
+    }
+
+    @Test
+    void discoDeParticaoESempreSelecionadoPorCaminhoDeArquivoNuncaPorNumero() {
+        DevDriveCreator.Plan plan = plan("DevDrive");
+
+        String script = creator.buildPartitionScript(plan);
 
         assertTrue(script.contains("select vdisk file=\""), "Selecao deve ser sempre por arquivo, nunca por 'select disk N'");
         assertTrue(!script.matches("(?s).*select disk \\d+.*"));
     }
 
     @Test
-    void caminhoComEspacosPermaneceEntreAspasNoScript() {
+    void caminhoComEspacosPermaneceEntreAspasNoScriptDeParticao() {
         Path vhd = Paths.get("C:\\Dev Drive Com Espacos\\DevDrive.vhdx");
         DevDriveCreator.Plan plan = new DevDriveCreator.Plan(vhd, 'D', 50L * 1024 * 1024 * 1024, "DevDrive");
 
-        String script = creator.buildCreateScript(plan);
+        String script = creator.buildPartitionScript(plan);
 
         String path = vhd.toAbsolutePath().toString();
         assertTrue(script.contains("\"" + path + "\""), "Caminho com espacos deve permanecer totalmente entre aspas para o DISKPART nao dividi-lo");
