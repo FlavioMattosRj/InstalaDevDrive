@@ -33,14 +33,19 @@ public final class DriveLetterFinder {
     public static char findFreeLetter() {
         Set<Character> used = usedLetters();
 
-        // Evita A, B (unidades de disquete historicas) e C (unidade do sistema)
-        for (char letter = 'D'; letter <= 'Z'; letter++) {
+        // Evita A, B (unidades de disquete historicas), C (unidade do
+        // sistema) e D (em campo, observamos maquinas onde D: e reservada
+        // por automacoes externas, mesmo quando aparece livre no momento
+        // desta checagem). Nada disso impede o usuario de pedir D
+        // explicitamente via --letter; so nao e mais o ponto de partida da
+        // escolha automatica.
+        for (char letter = 'E'; letter <= 'Z'; letter++) {
             if (!used.contains(letter)) {
                 return letter;
             }
         }
 
-        throw new IllegalStateException("Nao ha letras de unidade livres disponiveis (D-Z).");
+        throw new IllegalStateException("Nao ha letras de unidade livres disponiveis (E-Z).");
     }
 
     public static boolean isLetterFree(char letter) {

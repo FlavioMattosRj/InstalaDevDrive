@@ -113,7 +113,7 @@ public class InstalaDevDrive {
                 + "Opcoes:\n"
                 + "  --name NOME      Nome do arquivo VHDX e rotulo da unidade (padrao: DevDrive)\n"
                 + "  --size TAMANHO   Tamanho da unidade, ex.: 50GB, 100GB, 1TB (padrao: 50GB, minimo: 50GB)\n"
-                + "  --letter LETRA   Letra de unidade a usar, ex.: D (padrao: primeira letra livre)\n"
+                + "  --letter LETRA   Letra de unidade a usar, ex.: E (padrao: primeira letra livre a partir de E:)\n"
                 + "  --path DIRETORIO Diretorio onde o arquivo .vhdx sera criado (padrao: C:\\DevDrive)\n"
                 + "  --yes            Nao pedir confirmacao antes de formatar\n"
                 + "  --dry-run        Mostra o que seria feito, sem executar nenhuma alteracao\n"

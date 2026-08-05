@@ -269,7 +269,10 @@ class DevDriveCreatorTest {
     void resolvePlanEncontraLetraLivreQuandoNaoInformada() {
         DevDriveCreator.Plan plan = creator.resolvePlan("DevDrive", "50GB", null, null);
 
-        assertTrue(plan.driveLetter() >= 'D' && plan.driveLetter() <= 'Z');
+        // A partir de E: D e evitada na escolha automatica porque, em campo,
+        // algumas maquinas tem D: reservada por automacoes externas mesmo
+        // quando ela aparece livre no momento desta checagem.
+        assertTrue(plan.driveLetter() >= 'E' && plan.driveLetter() <= 'Z');
         assertTrue(DriveLetterFinder.isLetterFree(plan.driveLetter()));
     }
 
