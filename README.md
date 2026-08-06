@@ -40,6 +40,13 @@ A formatação final como Dev Drive (ReFS) usa o cmdlet `Format-Volume -DevDrive
 - **Execução como Administrador** (obrigatório para criar/formatar volumes)
 - Mínimo de **50 GB de espaço livre** no disco que receberá o arquivo `.vhdx`
 
+> **Java 24+**: a partir do JDK 24, o próprio Java passou a avisar quando uma
+> biblioteca nativa é carregada por código sem módulo nomeado (JEP 472) —
+> caso do [JNA](https://github.com/java-native-access/jna), usado pelo
+> pacote `virtdisk`. O manifest do JAR já vem com `Enable-Native-Access:
+> ALL-UNNAMED`, então rodar `java -jar InstalaDevDrive.jar` normalmente já
+> evita esse aviso, sem precisar de nenhuma flag extra na linha de comando.
+
 ---
 
 ## Como usar
