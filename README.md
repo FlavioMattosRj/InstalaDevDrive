@@ -65,7 +65,7 @@ java -jar InstalaDevDrive.jar [opcoes]
 | `--path DIRETÓRIO` | Diretório onde o `.vhdx` será criado | `C:\DevDrive` |
 | `--yes` | Não pede confirmação antes de formatar | — |
 | `--dry-run` | Mostra o que seria feito, sem executar nada | — |
-| `--verbose` | Mostra (em cor diferente) cada comando PowerShell efetivamente executado | — |
+| `--verbose` | Mostra (em cor diferente) cada comando PowerShell e script DISKPART efetivamente executado | — |
 | `--help` | Exibe a ajuda | — |
 
 ### Exemplos
@@ -80,7 +80,7 @@ java -jar InstalaDevDrive.jar --name MeuDev --size 100GB --letter D --path E:\VH
 # Simulação sem fazer nada (dry-run)
 java -jar InstalaDevDrive.jar --dry-run --name TesteDev --size 60GB
 
-# Modo verboso: imprime cada comando PowerShell executado, em cor diferente
+# Modo verboso: imprime cada comando PowerShell e script DISKPART executado, em cor diferente
 java -jar InstalaDevDrive.jar --verbose
 ```
 
@@ -97,7 +97,7 @@ java -jar InstalaDevDrive.jar --verbose
 6. DISKPART       → create partition primary / assign letter (disco já anexado)
 7. Verificação    → Confirma que a letra realmente apareceu no sistema de arquivos
 8. Format-Volume  → Formata como Dev Drive (ReFS) via PowerShell
-9. Verificação    → Confirma FORMAT_OK
+9. Verificação    → Confirma o marcador de sucesso na saída do PowerShell
 10. Em falha      → Rollback automático (dismount + delete arquivo)
 ```
 
@@ -159,8 +159,10 @@ src/main/java/.../
     core/
       DevDriveCreator.java    # Orquestrador principal
       DiskpartRunner.java     # Execução segura de scripts DISKPART
-      PowerShellRunner.java   # Execução de cmdlets PowerShell (+ modo --verbose)
+      PowerShellRunner.java   # Execução de cmdlets PowerShell
       ProcessRunner.java      # Execução genérica de processos externos
+      TrustedExecutables.java # Resolve powershell.exe/diskpart.exe por caminho absoluto de System32
+      VerboseLog.java         # Log compartilhado do modo --verbose (PowerShell + DISKPART)
       ElevationChecker.java   # Verificação de privilégios de Administrador
       DriveLetterFinder.java  # Busca/validação de letras de unidade
       SizeParser.java         # Parse e validação de tamanhos (50GB, 1TB etc.)

@@ -2,9 +2,9 @@ package br.nom.mattos.flavio.instaladevdrive;
 
 import br.nom.mattos.flavio.instaladevdrive.cli.CommandLineArgs;
 import br.nom.mattos.flavio.instaladevdrive.core.DevDriveCreator;
-import br.nom.mattos.flavio.instaladevdrive.core.PowerShellRunner;
 import br.nom.mattos.flavio.instaladevdrive.core.ProcessResult;
 import br.nom.mattos.flavio.instaladevdrive.core.SizeParser;
+import br.nom.mattos.flavio.instaladevdrive.core.VerboseLog;
 
 import java.util.Scanner;
 
@@ -24,6 +24,9 @@ import java.util.Scanner;
  * @author flavio mattos
  */
 public class InstalaDevDrive {
+
+    private static final String ANSI_BRIGHT_GREEN = "[92m";
+    private static final String ANSI_RESET = "[0m";
 
     public static void main(String[] args) {
         try {
@@ -48,7 +51,7 @@ public class InstalaDevDrive {
             return;
         }
 
-        PowerShellRunner.setVerbose(cli.verbose());
+        VerboseLog.setEnabled(cli.verbose());
 
         DevDriveCreator creator = new DevDriveCreator();
         DevDriveCreator.Plan plan = creator.resolvePlan(cli.name(), cli.size(), cli.letter(), cli.directory());
@@ -71,13 +74,13 @@ public class InstalaDevDrive {
             return;
         }
 
+        System.out.println("Verificando privilegios de Administrador...");
+        creator.checkElevation();
+
         if (!cli.assumeYes() && !confirm()) {
             System.out.println("Operacao cancelada pelo usuario.");
             return;
         }
-
-        System.out.println("Verificando privilegios de Administrador...");
-        creator.checkElevation();
 
         System.out.println("Criando o Dev Drive, aguarde...");
         ProcessResult result = creator.execute(plan);
@@ -93,7 +96,7 @@ public class InstalaDevDrive {
             throw new IllegalStateException("A criacao do Dev Drive falhou (codigo " + result.exitCode() + ").");
         }
 
-        System.out.println("Dev Drive criado com sucesso.");
+        System.out.println(ANSI_BRIGHT_GREEN + "Dev Drive criado com sucesso." + ANSI_RESET);
     }
 
     private static boolean confirm() {
@@ -117,7 +120,7 @@ public class InstalaDevDrive {
                 + "  --path DIRETORIO Diretorio onde o arquivo .vhdx sera criado (padrao: C:\\DevDrive)\n"
                 + "  --yes            Nao pedir confirmacao antes de formatar\n"
                 + "  --dry-run        Mostra o que seria feito, sem executar nenhuma alteracao\n"
-                + "  --verbose        Mostra (em outra cor) cada comando PowerShell executado\n"
+                + "  --verbose        Mostra (em outra cor) cada comando PowerShell e script DISKPART executado\n"
                 + "  --help           Mostra esta ajuda\n"
                 + "\n"
                 + "Remontagem apos reiniciar: o disco e anexado de forma permanente via a\n"

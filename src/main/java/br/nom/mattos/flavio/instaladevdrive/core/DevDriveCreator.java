@@ -167,8 +167,13 @@ public final class DevDriveCreator {
 
     /**
      * Verifica que o processo esta elevado (Administrador), requisito
-     * obrigatorio para criar/formatar volumes. Chamar apenas imediatamente
-     * antes de {@link #execute(Plan)}.
+     * obrigatorio para criar/formatar volumes. Deve ser chamado antes de
+     * qualquer confirmacao interativa ou acao real, para nao fazer o
+     * usuario passar por um prompt de confirmacao so para descobrir depois
+     * que falta privilegio. Nao ha janela de corrida em chamar isso antes
+     * de {@link #execute(Plan)}: o nivel de elevacao e uma propriedade do
+     * token do processo, fixada na criacao do processo - nao muda durante
+     * a execucao.
      */
     public void checkElevation() {
         if (!ElevationChecker.isElevated()) {

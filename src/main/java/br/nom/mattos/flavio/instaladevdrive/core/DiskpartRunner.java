@@ -37,7 +37,12 @@ public final class DiskpartRunner {
     private DiskpartRunner() {
     }
 
+    /**
+     * Executa um script do DISKPART. Em modo verboso (ver {@link VerboseLog}),
+     * imprime o script antes de roda-lo.
+     */
     public static ProcessResult runScript(String scriptContent) {
+        VerboseLog.log("DISKPART", scriptContent);
         Path tempScript = createRestrictedTempScript(scriptContent);
 
         try {
