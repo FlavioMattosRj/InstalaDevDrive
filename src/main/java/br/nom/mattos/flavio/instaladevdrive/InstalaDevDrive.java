@@ -33,8 +33,8 @@ import java.util.Scanner;
  */
 public class InstalaDevDrive {
 
-    private static final String ANSI_BRIGHT_GREEN = "[92m";
-    private static final String ANSI_RESET = "[0m";
+    private static final String ANSI_BRIGHT_GREEN = "[92m";
+    private static final String ANSI_RESET = "[0m";
 
     public static void main(String[] args) {
         try {
