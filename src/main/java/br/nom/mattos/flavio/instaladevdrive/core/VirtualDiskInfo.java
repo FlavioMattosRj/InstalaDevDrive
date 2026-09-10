@@ -13,14 +13,17 @@ import java.util.Map;
  * decidir se e seguro redimensionar e, depois, para confirmar por evidencia
  * real que o tamanho aumentou.
  *
- * <p>Os dados vem das propriedades <em>tipadas</em> dos cmdlets do modulo
- * Storage ({@code Get-Partition}/{@code Get-Disk}/{@code Get-Volume}) - nao
- * do texto formatado que eles imprimem para humanos. O script PowerShell
- * emite cada valor como uma linha {@code @IDD@ CHAVE=valor}, em que a chave
- * e um token ASCII escolhido por este programa e o valor e um numero, um
- * caminho ou um nome de enum ({@code ReFS}) - nada disso muda com o idioma
- * do Windows. E o equivalente enxuto de um {@code ConvertTo-Json} sem
- * trazer uma dependencia de parser JSON so para seis campos planos.
+ * <p>Os dados vem das classes CIM cruas do modulo Storage ({@code MSFT_Partition},
+ * {@code MSFT_Disk}, {@code MSFT_Volume}) via {@code Get-CimInstance} - nao
+ * dos cmdlets {@code Get-Disk}/{@code Get-Volume}, cuja saida passa por uma
+ * camada de formatacao que troca, por exemplo, o {@code BusType} numerico
+ * ({@code 15}) pela string amigavel {@code "File Backed Virtual"}. No CIM,
+ * {@code BusType} e um numero e {@code FileSystem} e a string real do
+ * volume ({@code "ReFS"}) - nada disso muda com o idioma do Windows. O
+ * script emite cada valor como uma linha {@code @IDD@ CHAVE=valor} (chave
+ * ASCII fixa, valor numerico ou caminho): o equivalente enxuto de um
+ * {@code ConvertTo-Json} sem trazer um parser JSON so para seis campos
+ * planos.
  *
  * @author flavio mattos
  */
@@ -98,17 +101,29 @@ public final class VirtualDiskInfo {
      */
     static String buildQueryCommand(char letter) {
         String nl = System.lineSeparator();
+        // Sem NENHUMA aspa dupla: elas nao sobrevivem a passagem por
+        // "powershell.exe -Command <script>" (o Windows/ProcessBuilder as
+        // remove). O filtro WQL precisa de aspas simples em volta do valor
+        // (DriveLetter='E'); montamos essa string por concatenacao usando
+        // $q = [char]39 (aspa simples), evitando aspas dentro de aspas.
         return "$ErrorActionPreference = 'Stop'" + nl
+                + "$ns = 'root/Microsoft/Windows/Storage'" + nl
+                + "$q = [char]39" + nl
+                + "$byLetter = 'DriveLetter=' + $q + '" + letter + "' + $q" + nl
                 + "try {" + nl
-                + "    $p = Get-Partition -DriveLetter '" + letter + "' -ErrorAction Stop" + nl
-                + "    $d = Get-Disk -Number $p.DiskNumber -ErrorAction Stop" + nl
-                + "    $v = Get-Volume -DriveLetter '" + letter + "' -ErrorAction Stop" + nl
-                + "    Write-Output ('" + LINE_PREFIX + "DISKNUMBER=' + [int]$d.Number)" + nl
-                + "    Write-Output ('" + LINE_PREFIX + "LOCATION=' + [string]$d.Location)" + nl
-                + "    Write-Output ('" + LINE_PREFIX + "BUSTYPE=' + [int]$d.BusType)" + nl
-                + "    Write-Output ('" + LINE_PREFIX + "DISKSIZE=' + [long]$d.Size)" + nl
-                + "    Write-Output ('" + LINE_PREFIX + "FSTYPE=' + [string]$v.FileSystemType)" + nl
-                + "    Write-Output ('" + LINE_PREFIX + "VOLUMESIZE=' + [long]$v.Size)" + nl
+                + "    $part = Get-CimInstance -Namespace $ns -ClassName MSFT_Partition -Filter $byLetter -ErrorAction Stop" + nl
+                + "    if (-not $part) { throw 'Nenhuma particao com a letra " + letter + ":' }" + nl
+                + "    $n = [int]$part.DiskNumber" + nl
+                + "    $disk = Get-CimInstance -Namespace $ns -ClassName MSFT_Disk -Filter ('Number=' + $n) -ErrorAction Stop" + nl
+                + "    if (-not $disk) { throw 'Nenhum disco encontrado para a particao de " + letter + ":' }" + nl
+                + "    $vol = Get-CimInstance -Namespace $ns -ClassName MSFT_Volume -Filter $byLetter -ErrorAction Stop" + nl
+                + "    if (-not $vol) { throw 'Nenhum volume com a letra " + letter + ":' }" + nl
+                + "    Write-Output ('" + LINE_PREFIX + "DISKNUMBER=' + $n)" + nl
+                + "    Write-Output ('" + LINE_PREFIX + "LOCATION=' + [string]$disk.Location)" + nl
+                + "    Write-Output ('" + LINE_PREFIX + "BUSTYPE=' + [int]$disk.BusType)" + nl
+                + "    Write-Output ('" + LINE_PREFIX + "DISKSIZE=' + [long]$disk.Size)" + nl
+                + "    Write-Output ('" + LINE_PREFIX + "FSTYPE=' + [string]$vol.FileSystem)" + nl
+                + "    Write-Output ('" + LINE_PREFIX + "VOLUMESIZE=' + [long]$vol.Size)" + nl
                 + "    Write-Output '" + LINE_PREFIX + OK_MARKER + "'" + nl
                 + "    exit 0" + nl
                 + "} catch {" + nl

@@ -25,12 +25,13 @@ import java.nio.file.Files;
  *       de novo mostra que o disco (e/ou o volume) cresceu.</li>
  * </ol>
  *
- * Validacoes antes de qualquer alteracao: a letra tem que estar em uso, o
- * disco tem que ser um VHDX baseado em arquivo, o volume tem que ser ReFS e
- * marcado como Dev Drive ({@code fsutil devdrv query}, so o codigo de
- * saida), o arquivo VHDX tem que existir e nao conter aspas, e o novo
- * tamanho nao pode ser menor que o atual (esta ferramenta so aumenta;
- * reducao de ReFS nao e suportada pelo Windows).
+ * Validacoes antes de qualquer alteracao: {@link #inspect(Plan)} (nao exige
+ * elevacao) confere que a letra esta em uso, o disco e um VHDX baseado em
+ * arquivo, o volume e ReFS, o arquivo VHDX existe e nao contem aspas, e o
+ * novo tamanho nao e menor que o atual (esta ferramenta so aumenta; reducao
+ * de ReFS nao e suportada pelo Windows). O gate final "e mesmo um Dev
+ * Drive" ({@code fsutil devdrv query}, so o codigo de saida) roda no inicio
+ * do {@link #execute}, ja elevado - o fsutil precisa de Administrador.
  *
  * @author flavio mattos
  */
@@ -108,11 +109,10 @@ public final class DevDriveResizer {
             throw new IllegalStateException(
                     "O arquivo VHDX que lastreia " + letter + ": nao foi encontrado: " + info.vhdxPath());
         }
-        if (!isDevDrive(letter)) {
-            throw new IllegalStateException(
-                    "A unidade " + letter + ": nao esta marcada como Dev Drive (fsutil devdrv query). "
-                            + "Esta ferramenta so redimensiona Dev Drives.");
-        }
+        // A confirmacao final de "e um Dev Drive" (fsutil devdrv query) NAO
+        // e feita aqui: ela exige elevacao e este metodo roda antes do
+        // checkElevation() (inclusive em --dry-run). Fica no inicio do
+        // execute(), ja elevado - ver requireDevDrive(char).
 
         if (plan.newSizeBytes() < info.diskSizeBytes() - SIZE_TOLERANCE_BYTES) {
             throw new IllegalArgumentException(
@@ -157,6 +157,11 @@ public final class DevDriveResizer {
     public ProcessResult execute(Plan plan, VirtualDiskInfo info) {
         char letter = plan.driveLetter();
         String vhdxPath = info.vhdxPath().toAbsolutePath().toString();
+
+        // Gate final: a unidade tem que ser mesmo um Dev Drive. Exige
+        // elevacao (ja garantida por checkElevation() antes deste metodo),
+        // por isso nao roda no inspect()/--dry-run.
+        requireDevDrive(letter);
 
         // Revalida imediatamente antes de agir, reduzindo a janela de corrida
         // entre a inspecao/confirmacao e a execucao real.
@@ -246,8 +251,21 @@ public final class DevDriveResizer {
         }
     }
 
-    private static boolean isDevDrive(char letter) {
-        return FsutilRunner.run(devDriveQueryArgs(letter)).success();
+    /**
+     * Falha se {@code letter} nao for um Dev Drive. Decide pelo <em>codigo
+     * de saida</em> de {@code fsutil devdrv query} (0 = e Dev Drive) - nunca
+     * pelo texto, que e localizado. Exige elevacao: sem ela o fsutil
+     * responde "acesso negado" e sai != 0, entao so chame depois do
+     * {@link #checkElevation()}.
+     */
+    private static void requireDevDrive(char letter) {
+        ProcessResult result = FsutilRunner.run(devDriveQueryArgs(letter));
+        if (!result.success()) {
+            throw new IllegalStateException(
+                    "A unidade " + letter + ": nao esta marcada como Dev Drive - 'fsutil devdrv query " + letter
+                            + ":' saiu com codigo " + result.exitCode() + ". Esta ferramenta so redimensiona "
+                            + "Dev Drives.\nSaida:\n" + result.stdout() + result.stderr());
+        }
     }
 
     /**

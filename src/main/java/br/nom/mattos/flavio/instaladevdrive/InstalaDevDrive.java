@@ -129,18 +129,20 @@ public class InstalaDevDrive {
 
         if (cli.dryRun()) {
             System.out.println("(--dry-run) Nenhuma alteracao sera feita. As etapas seriam:");
+            System.out.println(" 0. Confirmar que " + plan.driveLetter()
+                    + ": e um Dev Drive (fsutil devdrv query - exige Administrador)");
             if (growVhdx) {
                 System.out.println(" 1. Desanexar " + plan.driveLetter() + ": (a unidade fica offline por alguns segundos)");
                 System.out.println(" 2. Expandir o VHDX para " + SizeParser.toHumanReadable(plan.newSizeBytes())
                         + " via ExpandVirtualDisk (API nativa)");
                 System.out.println(" 3. Reanexar " + plan.driveLetter() + ": de forma permanente (sobrevive a reboots)");
                 System.out.println(" 4. Estender a particao ReFS para preencher o espaco novo (Resize-Partition)");
-                System.out.println(" 5. Confirmar via Get-Disk/Get-Volume que o tamanho aumentou");
+                System.out.println(" 5. Confirmar via MSFT_Disk/MSFT_Volume que o tamanho aumentou");
             } else {
                 System.out.println(" 1. O VHDX ja tem " + SizeParser.toHumanReadable(info.diskSizeBytes())
                         + "; nao sera expandido nem desanexado.");
                 System.out.println(" 2. Estender a particao ReFS (online) para preencher qualquer espaco nao alocado");
-                System.out.println(" 3. Confirmar via Get-Volume que o tamanho nao regrediu");
+                System.out.println(" 3. Confirmar via MSFT_Volume que o tamanho nao regrediu");
             }
             return;
         }

@@ -23,28 +23,43 @@ class VirtualDiskInfoTest {
     // ---------------------------------------------------------------
 
     @Test
-    void consultaUsaCmdletsTipadosDoModuloStorage() {
+    void consultaUsaClassesCimCruasNaoOsCmdletsFormatados() {
         String cmd = VirtualDiskInfo.buildQueryCommand('E');
 
         assertTrue(cmd.startsWith("$ErrorActionPreference = 'Stop'"));
-        assertTrue(cmd.contains("Get-Partition -DriveLetter 'E'"));
-        assertTrue(cmd.contains("Get-Disk -Number $p.DiskNumber"));
-        assertTrue(cmd.contains("Get-Volume -DriveLetter 'E'"));
+        assertTrue(cmd.contains("Get-CimInstance -Namespace $ns -ClassName MSFT_Partition -Filter $byLetter"));
+        assertTrue(cmd.contains("Get-CimInstance -Namespace $ns -ClassName MSFT_Disk -Filter ('Number=' + $n)"));
+        assertTrue(cmd.contains("Get-CimInstance -Namespace $ns -ClassName MSFT_Volume -Filter $byLetter"));
+        assertTrue(cmd.contains("$byLetter = 'DriveLetter=' + $q + 'E' + $q"));
         assertTrue(cmd.contains("} catch {"));
         assertTrue(cmd.contains("exit 1"));
+    }
+
+    @Test
+    void consultaNaoUsaNenhumaAspaDupla() {
+        // Aspas duplas nao sobrevivem a "powershell.exe -Command <script>"
+        // (removidas pelo Windows/ProcessBuilder). O filtro WQL DriveLetter='E'
+        // e montado por concatenacao com [char]39, sem aspas dentro de aspas.
+        String cmd = VirtualDiskInfo.buildQueryCommand('E');
+
+        assertEquals(-1, cmd.indexOf('"'), "O script gerado nao pode conter aspa dupla");
     }
 
     @Test
     void consultaNaoDependeDeTextoFormatadoParaHumanos() {
         String cmd = VirtualDiskInfo.buildQueryCommand('E');
 
-        // Le propriedades tipadas ([int]/[long]/[string]), nunca Format-* nem
-        // Out-String sobre a saida de exibicao.
+        // Get-Disk/Get-Volume trocariam o BusType numerico (15) pela string
+        // "File Backed Virtual" e [int] estouraria. As classes CIM cruas
+        // devolvem o numero; nunca ha Format-* nem Out-String no meio.
+        assertTrue(!cmd.contains("Get-Disk"));
+        assertTrue(!cmd.contains("Get-Volume"));
         assertTrue(!cmd.contains("Format-Table"));
         assertTrue(!cmd.contains("Format-List"));
         assertTrue(!cmd.contains("Out-String"));
-        assertTrue(cmd.contains("[long]$d.Size"));
-        assertTrue(cmd.contains("[int]$d.BusType"));
+        assertTrue(cmd.contains("[long]$disk.Size"));
+        assertTrue(cmd.contains("[int]$disk.BusType"));
+        assertTrue(cmd.contains("[string]$vol.FileSystem"));
     }
 
     // ---------------------------------------------------------------
