@@ -8,7 +8,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 /**
- * Resolve os caminhos absolutos de powershell.exe e diskpart.exe.
+ * Resolve os caminhos absolutos de powershell.exe, diskpart.exe e
+ * fsutil.exe.
  *
  * O diretorio System32 e obtido via SHGetFolderPath/CSIDL_SYSTEM (chamada
  * nativa ao Windows, atraves do JNA) em vez da variavel de ambiente
@@ -34,6 +35,8 @@ final class TrustedExecutables {
             resolveUnder(SYSTEM32, "WindowsPowerShell", "v1.0", "powershell.exe");
     private static final Path DISKPART =
             resolveUnder(SYSTEM32, "diskpart.exe");
+    private static final Path FSUTIL =
+            resolveUnder(SYSTEM32, "fsutil.exe");
 
     private TrustedExecutables() {
     }
@@ -44,6 +47,10 @@ final class TrustedExecutables {
 
     static String diskpartPath() {
         return DISKPART.toString();
+    }
+
+    static String fsutilPath() {
+        return FSUTIL.toString();
     }
 
     private static Path resolveSystem32() {

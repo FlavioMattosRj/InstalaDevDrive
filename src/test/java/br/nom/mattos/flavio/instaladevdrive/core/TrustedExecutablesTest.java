@@ -40,6 +40,16 @@ class TrustedExecutablesTest {
         assertTrue(containsSystem32(resolved));
     }
 
+    @Test
+    void fsutilPathApontaParaArquivoRealDentroDeSystem32() {
+        Path resolved = Paths.get(TrustedExecutables.fsutilPath());
+
+        assertTrue(resolved.isAbsolute());
+        assertTrue(Files.isRegularFile(resolved), "fsutil.exe resolvido nao existe: " + resolved);
+        assertTrue(resolved.toString().toLowerCase().endsWith("\\fsutil.exe"));
+        assertTrue(containsSystem32(resolved));
+    }
+
     private static boolean containsSystem32(Path resolved) {
         for (Path part : resolved) {
             if (part.toString().equalsIgnoreCase("System32")) {

@@ -1,6 +1,13 @@
 # InstalaDevDrive
 
-**InstalaDevDrive** é um utilitário Java que cria um [Dev Drive](https://learn.microsoft.com/pt-br/windows/dev-drive/) no Windows 11 de forma segura, controlada e auditável — sem expor o usuário diretamente ao `DISKPART`.
+**InstalaDevDrive** é um utilitário Java que cria — e agora também aumenta — um [Dev Drive](https://learn.microsoft.com/pt-br/windows/dev-drive/) no Windows 11 de forma segura, controlada e auditável — sem expor o usuário diretamente ao `DISKPART`.
+
+Dois subcomandos:
+
+| Subcomando | O que faz |
+|---|---|
+| `create` (padrão) | Cria um Dev Drive a partir de um novo VHDX |
+| `resize` | Aumenta um Dev Drive já existente (expande o VHDX e estende a partição ReFS) |
 
 ---
 
@@ -52,21 +59,36 @@ A formatação final como Dev Drive (ReFS) usa o cmdlet `Format-Volume -DevDrive
 ## Como usar
 
 ```
-java -jar InstalaDevDrive.jar [opcoes]
+java -jar InstalaDevDrive.jar [create] [opcoes]
+java -jar InstalaDevDrive.jar resize --letter LETRA --size TAMANHO [opcoes]
 ```
 
-### Opções
+Sem verbo, assume `create` (todas as invocações anteriores continuam valendo).
+
+### Opções de `create`
 
 | Opção | Descrição | Padrão |
 |---|---|---|
 | `--name NOME` | Nome do arquivo `.vhdx` e rótulo da unidade | `DevDrive` |
 | `--size TAMANHO` | Tamanho (ex.: `50GB`, `100GB`, `1TB`) | `50GB` |
-| `--letter LETRA` | Letra de unidade (ex.: `D`) | Primeira letra livre |
+| `--letter LETRA` | Letra de unidade (ex.: `E`) | Primeira letra livre a partir de `E:` |
 | `--path DIRETÓRIO` | Diretório onde o `.vhdx` será criado | `C:\DevDrive` |
-| `--yes` | Não pede confirmação antes de formatar | — |
+
+### Opções de `resize`
+
+| Opção | Descrição | Obrigatório |
+|---|---|---|
+| `--letter LETRA` | Letra do Dev Drive a aumentar. A unidade tem que estar montada, ser um VHDX baseado em arquivo, usar ReFS e estar marcada como Dev Drive. | Sim |
+| `--size TAMANHO` | Nova capacidade total (ex.: `100GB`, `1TB`). Não pode ser menor que a atual — o ReFS não encolhe. | Sim |
+
+### Opções comuns
+
+| Opção | Descrição | Padrão |
+|---|---|---|
+| `--yes` | Não pede confirmação antes de alterar a unidade | — |
 | `--dry-run` | Mostra o que seria feito, sem executar nada | — |
-| `--verbose` | Mostra (em cor diferente) cada comando PowerShell e script DISKPART efetivamente executado | — |
-| `--help` | Exibe a ajuda | — |
+| `--verbose` | Mostra (em cor diferente) cada comando PowerShell / script DISKPART / `fsutil` executado | — |
+| `--help` | Exibe a ajuda (`resize --help` detalha o resize) | — |
 
 ### Exemplos
 
@@ -74,13 +96,19 @@ java -jar InstalaDevDrive.jar [opcoes]
 # Criação padrão (50 GB, primeira letra livre, em C:\DevDrive)
 java -jar InstalaDevDrive.jar
 
-# Dev Drive de 100 GB na letra D, arquivo em E:\VHDs\MeuDev.vhdx
-java -jar InstalaDevDrive.jar --name MeuDev --size 100GB --letter D --path E:\VHDs
+# Dev Drive de 100 GB na letra E, arquivo em D:\VHDs\MeuDev.vhdx
+java -jar InstalaDevDrive.jar --name MeuDev --size 100GB --letter E --path D:\VHDs
 
 # Simulação sem fazer nada (dry-run)
 java -jar InstalaDevDrive.jar --dry-run --name TesteDev --size 60GB
 
-# Modo verboso: imprime cada comando PowerShell e script DISKPART executado, em cor diferente
+# Aumentar o Dev Drive da unidade E: para 200 GB
+java -jar InstalaDevDrive.jar resize --letter E --size 200GB
+
+# Ver o que o resize faria, sem tocar em nada
+java -jar InstalaDevDrive.jar resize --letter E --size 200GB --dry-run
+
+# Modo verboso: imprime cada comando executado, em cor diferente
 java -jar InstalaDevDrive.jar --verbose
 ```
 
@@ -122,6 +150,45 @@ mesmo chamado de uma execução diferente da que anexou (é assim que o
 
 ---
 
+## Fluxo de redimensionamento (`resize`)
+
+```
+1. resolvePlan   → Interpreta --size (bytes) e valida o mínimo (sem precisar ser Admin)
+2. inspect       → Get-Partition/Get-Disk/Get-Volume (saída tipada) descobrem o VHDX,
+                   o barramento, o sistema de arquivos e os tamanhos atuais.
+                   Valida: letra em uso, VHDX baseado em arquivo (BusType 15),
+                   ReFS, arquivo existente sem aspas, e Dev Drive
+                   (fsutil devdrv query — só o código de saída, o texto é localizado).
+                   Rejeita redução (--size menor que a capacidade atual).
+3. checkElevation → Confirma execução como Administrador
+4. Confirmação    → Só quando o VHDX precisa crescer (aí a unidade fica offline);
+                    aceita --yes
+── se o novo tamanho > capacidade atual do VHDX (fora da folga de 64 MiB): ──
+5. VhdxMount.dismount()    → Desanexa (a Virtual Disk API exige o disco desanexado)
+6. Verificação            → Confirma que a letra sumiu do sistema de arquivos
+7. VhdxMount.expandTo()    → ExpandVirtualDisk (virtdisk.dll nativo), tamanho em bytes
+8. VhdxMount.mountPermanently() → Reanexa PERMANENTE (mesma política da criação)
+9. Verificação            → Confirma que a letra reapareceu
+── sempre: ──
+10. Resize-Partition → Estende a partição/volume ReFS até o máximo (online, sem apagar
+                       dados); só chama se houver espaço a ganhar (idempotente)
+11. Verificação     → Get-Disk/Get-Volume confirmam que o tamanho aumentou (e não regrediu)
+```
+
+Se algo falhar **depois** de o VHDX já ter sido expandido, a unidade é
+reanexada e a mensagem orienta a rodar o mesmo `resize` de novo — a operação
+é idempotente: o `expand` vira no-op e a extensão da partição é concluída. O
+arquivo `.vhdx` **nunca** é apagado no `resize` (é dado do usuário).
+
+Quando `--size` é igual (a menos da folga de alinhamento) ou já cabe na
+capacidade atual do VHDX, o passo caro é pulado: nada é desanexado e só a
+partição é estendida, online.
+
+O `resize` **não usa DISKPART** — apenas a Virtual Disk API nativa e o
+módulo Storage do PowerShell.
+
+---
+
 ## Build a partir do código-fonte
 
 Requer **Maven 3.6+** e **JDK 17+**.
@@ -140,11 +207,14 @@ O JAR executável com todas as dependências será gerado em `target/InstalaDevD
 mvn test
 ```
 
-Os testes cobrem principalmente a **geração dos comandos** de DISKPART e PowerShell
-(`DevDriveCreatorTest`, `PowerShellRunnerTest`, `ElevationCheckerTest`) e as validações
-que a antecedem (`CommandLineArgsTest`, `SizeParserTest`), sem executar nenhum processo
-real — incluindo casos de escaping de aspas no rótulo, tentativas de "injeção" via
-`--name`, arredondamento de tamanho e caminhos com espaços.
+Os testes cobrem principalmente a **geração dos comandos** de DISKPART, PowerShell e
+`fsutil` (`DevDriveCreatorTest`, `DevDriveResizerTest`, `PowerShellRunnerTest`,
+`FsutilRunnerTest`, `ElevationCheckerTest`), o **parsing locale-independente** da
+inspeção de volume (`VirtualDiskInfoTest`) e as validações que os antecedem
+(`CommandLineArgsTest`, `SizeParserTest`), sem executar nenhum processo real —
+incluindo casos de escaping de aspas no rótulo, tentativas de "injeção" via `--name`,
+arredondamento de tamanho, caminhos com espaços, saída de inspeção truncada e a
+folga de alinhamento do `resize`.
 
 ---
 
@@ -153,26 +223,30 @@ real — incluindo casos de escaping de aspas no rótulo, tentativas de "injeç�
 ```
 src/main/java/.../
   instaladevdrive/
-    InstalaDevDrive.java      # Ponto de entrada (main)
+    InstalaDevDrive.java      # Ponto de entrada (main): despacha create / resize
     cli/
-      CommandLineArgs.java    # Parse de argumentos de linha de comando
+      CommandLineArgs.java    # Parse de argumentos + subcomando (verbo) create/resize
     core/
-      DevDriveCreator.java    # Orquestrador principal
+      DevDriveCreator.java    # Orquestrador da criação
+      DevDriveResizer.java    # Orquestrador do resize (expand VHDX + estende ReFS)
+      VirtualDiskInfo.java    # Inspeção do volume (letra → VHDX/barramento/FS/tamanhos), locale-independente
       DiskpartRunner.java     # Execução segura de scripts DISKPART
       PowerShellRunner.java   # Execução de cmdlets PowerShell
+      FsutilRunner.java       # Execução de fsutil.exe (devdrv query — só o código de saída)
       ProcessRunner.java      # Execução genérica de processos externos
-      TrustedExecutables.java # Resolve powershell.exe/diskpart.exe por caminho absoluto de System32
-      VerboseLog.java         # Log compartilhado do modo --verbose (PowerShell + DISKPART)
+      TrustedExecutables.java # Resolve powershell.exe/diskpart.exe/fsutil.exe por caminho absoluto de System32
+      VerboseLog.java         # Log compartilhado do modo --verbose (PowerShell + DISKPART + fsutil)
       ElevationChecker.java   # Verificação de privilégios de Administrador
       DriveLetterFinder.java  # Busca/validação de letras de unidade
       SizeParser.java         # Parse e validação de tamanhos (50GB, 1TB etc.)
       ProcessResult.java      # Resultado de execução de processo externo
-  virtdisk/                   # Binding JNA para a Windows Virtual Disk API (attach nativo/permanente)
-    VhdxMount.java            # API publica: mount() / mountPermanently() / dismount()
-    VirtDisk.java             # Binding JNA de virtdisk.dll (OpenVirtualDisk/AttachVirtualDisk/DetachVirtualDisk)
+  virtdisk/                   # Binding JNA para a Windows Virtual Disk API (attach/expand nativos)
+    VhdxMount.java            # API publica: mount() / mountPermanently() / dismount() / expandTo()
+    VirtDisk.java             # Binding JNA de virtdisk.dll (Open/Attach/Detach/ExpandVirtualDisk)
     VirtualStorageType.java   # Struct VIRTUAL_STORAGE_TYPE
     OpenVirtualDiskParameters.java     # Struct OPEN_VIRTUAL_DISK_PARAMETERS (v2)
     AttachVirtualDiskParameters.java   # Struct ATTACH_VIRTUAL_DISK_PARAMETERS (v1)
+    ExpandVirtualDiskParameters.java   # Struct EXPAND_VIRTUAL_DISK_PARAMETERS (v1)
     VirtualDiskException.java # Erro de chamada a virtdisk.dll, com código Win32
 src/test/java/.../            # Testes JUnit 5 (mvn test)
 ```

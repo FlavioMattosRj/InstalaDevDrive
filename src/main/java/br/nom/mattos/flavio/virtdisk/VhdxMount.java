@@ -26,6 +26,11 @@ import java.io.File;
  *       o mesmo arquivo, mesmo em outra execucao do programa.</li>
  * </ul>
  *
+ * <p>{@link #expandTo(long)} aumenta a capacidade do VHDX. A Windows
+ * Virtual Disk API exige o disco DESANEXADO para expandir, entao o fluxo
+ * tipico e {@link #dismount()} -> {@link #expandTo(long)} ->
+ * {@link #mountPermanently()}.
+ *
  * <p>Pacote autocontido: para reusar em outro projeto Maven/Gradle, basta
  * copiar esta pasta de pacote e declarar as dependencias
  * net.java.dev.jna:jna e net.java.dev.jna:jna-platform.
@@ -39,6 +44,8 @@ public final class VhdxMount {
     private static final int ATTACH_FLAG_PERMANENT_LIFETIME = 0x00000004;
     private static final int ATTACH_FLAG_AT_BOOT = 0x00000400;
     private static final int ATTACH_FLAGS_PERMANENT_AT_BOOT = ATTACH_FLAG_PERMANENT_LIFETIME | ATTACH_FLAG_AT_BOOT;
+
+    private static final int EXPAND_FLAG_NONE = 0x00000000;
 
     private final String vhdxPath;
     private HANDLE mountedHandle;
@@ -71,6 +78,37 @@ public final class VhdxMount {
         // mesmo valor reciclado nesse meio-tempo.
         // PERMANENT_LIFETIME desacopla o disco do handle -- fechar aqui nao desanexa.
         Kernel32.INSTANCE.CloseHandle(handle);
+    }
+
+    /**
+     * Aumenta a capacidade do VHDX para {@code newSizeBytes} chamando
+     * ExpandVirtualDisk (virtdisk.dll). Para um VHDX expansivel ("type=
+     * expandable"), so mexe no tamanho logico -- o arquivo em disco cresce
+     * de fato apenas conforme e usado.
+     *
+     * <p>Pre-condicao: o disco NAO pode estar anexado (nem por esta
+     * instancia, nem permanentemente por outra execucao). A Windows Virtual
+     * Disk API rejeita a expansao de um disco anexado em leitura/escrita.
+     * Cabe ao chamador garantir isso, tipicamente chamando {@link #dismount()}
+     * antes. Nao ha reducao: passar um valor menor que a capacidade atual
+     * faz a API retornar erro.
+     */
+    public synchronized void expandTo(long newSizeBytes) {
+        if (mountedHandle != null) {
+            throw new IllegalStateException("nao e possivel expandir: ainda anexado por esta instancia (chame dismount())");
+        }
+        HANDLE handle = open();
+        try {
+            ExpandVirtualDiskParameters params = new ExpandVirtualDiskParameters();
+            params.newSize = newSizeBytes;
+            params.write();
+            int rc = VirtDisk.INSTANCE.ExpandVirtualDisk(handle, EXPAND_FLAG_NONE, params, null);
+            if (rc != WinError.ERROR_SUCCESS) {
+                throw new VirtualDiskException("ExpandVirtualDisk", rc);
+            }
+        } finally {
+            Kernel32.INSTANCE.CloseHandle(handle);
+        }
     }
 
     /** Desanexa o VHDX -- funciona mesmo se o attach foi feito por outra instancia/execucao (ex.: mountPermanently). */

@@ -14,6 +14,29 @@ public final class CommandLineArgs {
     public static final String DEFAULT_NAME = "DevDrive";
     public static final String DEFAULT_SIZE = "50GB";
 
+    /**
+     * Subcomando (verbo) da linha de comando. {@code CREATE} e o padrao
+     * quando nenhum verbo e informado, para nao quebrar as invocacoes
+     * historicas ({@code java -jar InstalaDevDrive.jar --name ...}).
+     */
+    public enum Command {
+        CREATE,
+        RESIZE;
+
+        static Command parse(String token) {
+            switch (token.toLowerCase()) {
+                case "create":
+                    return CREATE;
+                case "resize":
+                    return RESIZE;
+                default:
+                    throw new IllegalArgumentException(
+                            "Comando desconhecido: '" + token + "'. Use 'create' ou 'resize'.");
+            }
+        }
+    }
+
+    private Command command = Command.CREATE;
     private String name = DEFAULT_NAME;
     private String size = DEFAULT_SIZE;
     private Character letter;
@@ -22,11 +45,19 @@ public final class CommandLineArgs {
     private boolean assumeYes;
     private boolean help;
     private boolean verbose;
+    private boolean nameProvided;
+    private boolean sizeProvided;
 
     public static CommandLineArgs parse(String[] args) {
         CommandLineArgs result = new CommandLineArgs();
 
-        for (int i = 0; i < args.length; i++) {
+        int start = 0;
+        if (args.length > 0 && !args[0].startsWith("-")) {
+            result.command = Command.parse(args[0]);
+            start = 1;
+        }
+
+        for (int i = start; i < args.length; i++) {
             String arg = args[i];
             String key;
             String inlineValue = null;
@@ -64,10 +95,12 @@ public final class CommandLineArgs {
                 case "name":
                     requireValuePresent(args, i, inlineValue, "name");
                     result.name = inlineValue != null ? inlineValue : args[++i];
+                    result.nameProvided = true;
                     break;
                 case "size":
                     requireValuePresent(args, i, inlineValue, "size");
                     result.size = inlineValue != null ? inlineValue : args[++i];
+                    result.sizeProvided = true;
                     break;
                 case "letter": {
                     requireValuePresent(args, i, inlineValue, "letter");
@@ -88,7 +121,34 @@ public final class CommandLineArgs {
             }
         }
 
+        result.validateForCommand();
         return result;
+    }
+
+    /**
+     * Regras especificas de cada subcomando, aplicadas depois do parsing. O
+     * {@code resize} identifica a unidade alvo por {@code --letter} e o novo
+     * tamanho total por {@code --size} (ambos obrigatorios); {@code --name} e
+     * {@code --path} sao insumos so da criacao e nao se aplicam.
+     */
+    private void validateForCommand() {
+        if (help || command != Command.RESIZE) {
+            return;
+        }
+        if (letter == null) {
+            throw new IllegalArgumentException(
+                    "O comando 'resize' exige --letter (a unidade a redimensionar).");
+        }
+        if (!sizeProvided) {
+            throw new IllegalArgumentException(
+                    "O comando 'resize' exige --size (o novo tamanho total da unidade).");
+        }
+        if (nameProvided) {
+            throw new IllegalArgumentException("--name nao se aplica ao comando 'resize'.");
+        }
+        if (directory != null) {
+            throw new IllegalArgumentException("--path nao se aplica ao comando 'resize'.");
+        }
     }
 
     /**
@@ -101,6 +161,10 @@ public final class CommandLineArgs {
         if (inlineValue == null && currentIndex + 1 >= args.length) {
             throw new IllegalArgumentException("Falta o valor de --" + flagName + ".");
         }
+    }
+
+    public Command command() {
+        return command;
     }
 
     public String name() {

@@ -24,6 +24,7 @@ class CommandLineArgsTest {
     void valoresPadraoSemArgumentos() {
         CommandLineArgs cli = CommandLineArgs.parse(new String[0]);
 
+        assertEquals(CommandLineArgs.Command.CREATE, cli.command());
         assertEquals(CommandLineArgs.DEFAULT_NAME, cli.name());
         assertEquals(CommandLineArgs.DEFAULT_SIZE, cli.size());
         assertNull(cli.letter());
@@ -32,6 +33,89 @@ class CommandLineArgsTest {
         assertFalse(cli.assumeYes());
         assertFalse(cli.help());
         assertFalse(cli.verbose());
+    }
+
+    // ---------------------------------------------------------------
+    // subcomando (verbo)
+    // ---------------------------------------------------------------
+
+    @Test
+    void semVerboAssumeCreate() {
+        CommandLineArgs cli = CommandLineArgs.parse(new String[]{"--size", "60GB"});
+
+        assertEquals(CommandLineArgs.Command.CREATE, cli.command());
+        assertEquals("60GB", cli.size());
+    }
+
+    @Test
+    void verboCreateExplicito() {
+        CommandLineArgs cli = CommandLineArgs.parse(new String[]{"create", "--name", "Foo"});
+
+        assertEquals(CommandLineArgs.Command.CREATE, cli.command());
+        assertEquals("Foo", cli.name());
+    }
+
+    @Test
+    void verboResizeExigeLetraETamanho() {
+        CommandLineArgs cli = CommandLineArgs.parse(new String[]{"resize", "--letter", "e", "--size", "100GB"});
+
+        assertEquals(CommandLineArgs.Command.RESIZE, cli.command());
+        assertEquals(Character.valueOf('E'), cli.letter());
+        assertEquals("100GB", cli.size());
+    }
+
+    @Test
+    void verboEhCaseInsensitive() {
+        assertEquals(CommandLineArgs.Command.RESIZE,
+                CommandLineArgs.parse(new String[]{"RESIZE", "--letter", "E", "--size", "100GB"}).command());
+    }
+
+    @Test
+    void verboDesconhecidoEhRejeitado() {
+        assertThrows(IllegalArgumentException.class,
+                () -> CommandLineArgs.parse(new String[]{"destroy", "--letter", "E"}));
+    }
+
+    @Test
+    void resizeSemLetterEhRejeitado() {
+        assertThrows(IllegalArgumentException.class,
+                () -> CommandLineArgs.parse(new String[]{"resize", "--size", "100GB"}));
+    }
+
+    @Test
+    void resizeSemSizeEhRejeitado() {
+        assertThrows(IllegalArgumentException.class,
+                () -> CommandLineArgs.parse(new String[]{"resize", "--letter", "E"}));
+    }
+
+    @Test
+    void resizeComNameEhRejeitado() {
+        assertThrows(IllegalArgumentException.class, () -> CommandLineArgs.parse(
+                new String[]{"resize", "--letter", "E", "--size", "100GB", "--name", "Foo"}));
+    }
+
+    @Test
+    void resizeComPathEhRejeitado() {
+        assertThrows(IllegalArgumentException.class, () -> CommandLineArgs.parse(
+                new String[]{"resize", "--letter", "E", "--size", "100GB", "--path", "C:\\X"}));
+    }
+
+    @Test
+    void resizeComHelpNaoExigeLetraNemTamanho() {
+        CommandLineArgs cli = CommandLineArgs.parse(new String[]{"resize", "--help"});
+
+        assertEquals(CommandLineArgs.Command.RESIZE, cli.command());
+        assertTrue(cli.help());
+    }
+
+    @Test
+    void resizeAceitaFlagsComuns() {
+        CommandLineArgs cli = CommandLineArgs.parse(
+                new String[]{"resize", "--letter", "E", "--size", "100GB", "--yes", "--dry-run", "--verbose"});
+
+        assertTrue(cli.assumeYes());
+        assertTrue(cli.dryRun());
+        assertTrue(cli.verbose());
     }
 
     @Test
