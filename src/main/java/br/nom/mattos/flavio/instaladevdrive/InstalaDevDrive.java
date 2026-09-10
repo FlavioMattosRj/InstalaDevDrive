@@ -33,8 +33,10 @@ import java.util.Scanner;
  */
 public class InstalaDevDrive {
 
-    private static final String ANSI_BRIGHT_GREEN = "[92m";
-    private static final String ANSI_RESET = "[0m";
+    /** Caractere de escape ANSI (ASCII 27, 0x1B); prefixo de toda sequencia de cor. */
+    private static final char ESC = 27;
+    private static final String ANSI_BRIGHT_GREEN = ESC + "[92m";
+    private static final String ANSI_RESET = ESC + "[0m";
 
     public static void main(String[] args) {
         try {
