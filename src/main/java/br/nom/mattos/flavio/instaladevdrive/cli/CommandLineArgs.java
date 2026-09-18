@@ -21,7 +21,8 @@ public final class CommandLineArgs {
      */
     public enum Command {
         CREATE,
-        RESIZE;
+        RESIZE,
+        DELETE;
 
         static Command parse(String token) {
             switch (token.toLowerCase()) {
@@ -29,9 +30,11 @@ public final class CommandLineArgs {
                     return CREATE;
                 case "resize":
                     return RESIZE;
+                case "delete":
+                    return DELETE;
                 default:
                     throw new IllegalArgumentException(
-                            "Comando desconhecido: '" + token + "'. Use 'create' ou 'resize'.");
+                            "Comando desconhecido: '" + token + "'. Use 'create', 'resize' ou 'delete'.");
             }
         }
     }
@@ -126,29 +129,40 @@ public final class CommandLineArgs {
     }
 
     /**
-     * Regras especificas de cada subcomando, aplicadas depois do parsing. O
-     * {@code resize} identifica a unidade alvo por {@code --letter} e o novo
-     * tamanho total por {@code --size} (ambos obrigatorios); {@code --name} e
-     * {@code --path} sao insumos so da criacao e nao se aplicam.
+     * Regras especificas de cada subcomando, aplicadas depois do parsing.
+     * {@code resize} e {@code delete} identificam a unidade alvo por
+     * {@code --letter} (obrigatorio nos dois); {@code resize} tambem exige
+     * {@code --size} (o novo tamanho total), enquanto {@code delete} nao
+     * aceita {@code --size} (a unidade inteira e removida, nao ha "novo
+     * tamanho" a informar). {@code --name} e {@code --path} sao insumos so
+     * da criacao e nao se aplicam a nenhum dos dois.
      */
     private void validateForCommand() {
-        if (help || command != Command.RESIZE) {
+        if (help || command == Command.CREATE) {
             return;
         }
         if (letter == null) {
             throw new IllegalArgumentException(
-                    "O comando 'resize' exige --letter (a unidade a redimensionar).");
+                    "O comando '" + commandToken() + "' exige --letter (a unidade a "
+                            + (command == Command.RESIZE ? "redimensionar" : "excluir") + ").");
         }
-        if (!sizeProvided) {
+        if (command == Command.RESIZE && !sizeProvided) {
             throw new IllegalArgumentException(
                     "O comando 'resize' exige --size (o novo tamanho total da unidade).");
         }
+        if (command == Command.DELETE && sizeProvided) {
+            throw new IllegalArgumentException("--size nao se aplica ao comando 'delete'.");
+        }
         if (nameProvided) {
-            throw new IllegalArgumentException("--name nao se aplica ao comando 'resize'.");
+            throw new IllegalArgumentException("--name nao se aplica ao comando '" + commandToken() + "'.");
         }
         if (directory != null) {
-            throw new IllegalArgumentException("--path nao se aplica ao comando 'resize'.");
+            throw new IllegalArgumentException("--path nao se aplica ao comando '" + commandToken() + "'.");
         }
+    }
+
+    private String commandToken() {
+        return command == Command.RESIZE ? "resize" : "delete";
     }
 
     /**

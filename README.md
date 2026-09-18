@@ -1,13 +1,14 @@
 # InstalaDevDrive
 
-**InstalaDevDrive** é um utilitário Java que cria — e agora também aumenta — um [Dev Drive](https://learn.microsoft.com/pt-br/windows/dev-drive/) no Windows 11 de forma segura, controlada e auditável — sem expor o usuário diretamente ao `DISKPART`.
+**InstalaDevDrive** é um utilitário Java que cria, aumenta e exclui um [Dev Drive](https://learn.microsoft.com/pt-br/windows/dev-drive/) no Windows 11 de forma segura, controlada e auditável — sem expor o usuário diretamente ao `DISKPART`.
 
-Dois subcomandos:
+Três subcomandos:
 
 | Subcomando | O que faz |
 |---|---|
 | `create` (padrão) | Cria um Dev Drive a partir de um novo VHDX |
 | `resize` | Aumenta um Dev Drive já existente (expande o VHDX e estende a partição ReFS) |
+| `delete` | Exclui permanentemente um Dev Drive já existente (desanexa e apaga o arquivo VHDX) |
 
 ---
 
@@ -61,6 +62,7 @@ A formatação final como Dev Drive (ReFS) usa o cmdlet `Format-Volume -DevDrive
 ```
 java -jar InstalaDevDrive.jar [create] [opcoes]
 java -jar InstalaDevDrive.jar resize --letter LETRA --size TAMANHO [opcoes]
+java -jar InstalaDevDrive.jar delete --letter LETRA [opcoes]
 ```
 
 Sem verbo, assume `create` (todas as invocações anteriores continuam valendo).
@@ -81,14 +83,20 @@ Sem verbo, assume `create` (todas as invocações anteriores continuam valendo).
 | `--letter LETRA` | Letra do Dev Drive a aumentar. A unidade tem que estar montada, ser um VHDX baseado em arquivo, usar ReFS e estar marcada como Dev Drive. | Sim |
 | `--size TAMANHO` | Nova capacidade total (ex.: `100GB`, `1TB`). Não pode ser menor que a atual — o ReFS não encolhe. | Sim |
 
+### Opções de `delete`
+
+| Opção | Descrição | Obrigatório |
+|---|---|---|
+| `--letter LETRA` | Letra do Dev Drive a excluir. A unidade tem que estar montada, ser um VHDX baseado em arquivo, usar ReFS e estar marcada como Dev Drive. **Apaga o arquivo `.vhdx` e todos os dados.** | Sim |
+
 ### Opções comuns
 
 | Opção | Descrição | Padrão |
 |---|---|---|
-| `--yes` | Não pede confirmação antes de alterar a unidade | — |
+| `--yes` | Não pede confirmação antes de alterar/excluir a unidade | — |
 | `--dry-run` | Mostra o que seria feito, sem executar nada | — |
 | `--verbose` | Mostra (em cor diferente) cada comando PowerShell / script DISKPART / `fsutil` executado | — |
-| `--help` | Exibe a ajuda (`resize --help` detalha o resize) | — |
+| `--help` | Exibe a ajuda (`resize --help`/`delete --help` detalham cada subcomando) | — |
 
 ### Exemplos
 
@@ -110,6 +118,15 @@ java -jar InstalaDevDrive.jar resize --letter E --size 200GB --dry-run
 
 # Modo verboso: imprime cada comando executado, em cor diferente
 java -jar InstalaDevDrive.jar --verbose
+
+# Excluir permanentemente o Dev Drive da unidade E: (pede confirmação)
+java -jar InstalaDevDrive.jar delete --letter E
+
+# Ver o que o delete faria, sem tocar em nada
+java -jar InstalaDevDrive.jar delete --letter E --dry-run
+
+# Excluir sem pedir confirmação (ex.: uso em script/CI)
+java -jar InstalaDevDrive.jar delete --letter E --yes
 ```
 
 ---
@@ -146,7 +163,8 @@ adulterado para rodar comandos arbitrários como SYSTEM no próximo boot.
 
 Para desfazer a anexação permanente, use `VhdxMount.dismount()` — funciona
 mesmo chamado de uma execução diferente da que anexou (é assim que o
-`rollback()` do `DevDriveCreator` desfaz uma criação malsucedida).
+`rollback()` do `DevDriveCreator` desfaz uma criação malsucedida, e também
+como o `DevDriveDeleter` desanexa o disco antes de apagar o arquivo `.vhdx`).
 
 ---
 
@@ -189,6 +207,34 @@ módulo Storage do PowerShell.
 
 ---
 
+## Fluxo de exclusão (`delete`)
+
+```
+1. resolvePlan   → Normaliza a letra (sem precisar ser Admin)
+2. inspect       → Get-Partition/Get-Disk/Get-Volume (saída tipada) descobrem o VHDX.
+                   Valida: letra em uso, VHDX baseado em arquivo (BusType 15),
+                   ReFS, arquivo existente sem aspas.
+3. checkElevation → Confirma execução como Administrador
+4. Confirmação    → SEMPRE pedida (a menos de --yes) — aviso explícito de que a
+                    exclusão é permanente e irreversível
+5. fsutil devdrv query → Gate final: confirma que é mesmo um Dev Drive (só o
+                        código de saída, o texto é localizado)
+6. VhdxMount.dismount() → Desanexa o disco (a letra de unidade deixa de existir)
+7. Verificação          → Confirma que a letra sumiu do sistema de arquivos
+8. Files.delete()       → Apaga o arquivo .vhdx do disco físico
+```
+
+Diferente do `resize`, o `delete` **sempre** apaga o arquivo `.vhdx` — não há
+rollback nem modo "melhor esforço" nessa etapa final: uma vez desanexado e
+apagado, os dados da unidade estão perdidos. Por isso a confirmação
+interativa é sempre exigida, mesmo em uso não-verboso, a menos que `--yes`
+seja passado explicitamente.
+
+O `delete` **não usa DISKPART** — apenas a Virtual Disk API nativa e o
+módulo Storage do PowerShell (mesma abordagem do `resize`).
+
+---
+
 ## Build a partir do código-fonte
 
 Requer **Maven 3.6+** e **JDK 17+**.
@@ -208,13 +254,13 @@ mvn test
 ```
 
 Os testes cobrem principalmente a **geração dos comandos** de DISKPART, PowerShell e
-`fsutil` (`DevDriveCreatorTest`, `DevDriveResizerTest`, `PowerShellRunnerTest`,
-`FsutilRunnerTest`, `ElevationCheckerTest`), o **parsing locale-independente** da
-inspeção de volume (`VirtualDiskInfoTest`) e as validações que os antecedem
-(`CommandLineArgsTest`, `SizeParserTest`), sem executar nenhum processo real —
-incluindo casos de escaping de aspas no rótulo, tentativas de "injeção" via `--name`,
-arredondamento de tamanho, caminhos com espaços, saída de inspeção truncada e a
-folga de alinhamento do `resize`.
+`fsutil` (`DevDriveCreatorTest`, `DevDriveResizerTest`, `DevDriveDeleterTest`,
+`PowerShellRunnerTest`, `FsutilRunnerTest`, `ElevationCheckerTest`), o **parsing
+locale-independente** da inspeção de volume (`VirtualDiskInfoTest`) e as validações
+que os antecedem (`CommandLineArgsTest`, `SizeParserTest`), sem executar nenhum
+processo real — incluindo casos de escaping de aspas no rótulo, tentativas de
+"injeção" via `--name`, arredondamento de tamanho, caminhos com espaços, saída de
+inspeção truncada e a folga de alinhamento do `resize`.
 
 ---
 
@@ -223,12 +269,13 @@ folga de alinhamento do `resize`.
 ```
 src/main/java/.../
   instaladevdrive/
-    InstalaDevDrive.java      # Ponto de entrada (main): despacha create / resize
+    InstalaDevDrive.java      # Ponto de entrada (main): despacha create / resize / delete
     cli/
-      CommandLineArgs.java    # Parse de argumentos + subcomando (verbo) create/resize
+      CommandLineArgs.java    # Parse de argumentos + subcomando (verbo) create/resize/delete
     core/
       DevDriveCreator.java    # Orquestrador da criação
       DevDriveResizer.java    # Orquestrador do resize (expand VHDX + estende ReFS)
+      DevDriveDeleter.java    # Orquestrador da exclusão (dismount + apaga o VHDX)
       VirtualDiskInfo.java    # Inspeção do volume (letra → VHDX/barramento/FS/tamanhos), locale-independente
       DiskpartRunner.java     # Execução segura de scripts DISKPART
       PowerShellRunner.java   # Execução de cmdlets PowerShell

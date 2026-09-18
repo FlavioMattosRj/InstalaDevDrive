@@ -2,6 +2,7 @@ package br.nom.mattos.flavio.instaladevdrive;
 
 import br.nom.mattos.flavio.instaladevdrive.cli.CommandLineArgs;
 import br.nom.mattos.flavio.instaladevdrive.core.DevDriveCreator;
+import br.nom.mattos.flavio.instaladevdrive.core.DevDriveDeleter;
 import br.nom.mattos.flavio.instaladevdrive.core.DevDriveResizer;
 import br.nom.mattos.flavio.instaladevdrive.core.ProcessResult;
 import br.nom.mattos.flavio.instaladevdrive.core.SizeParser;
@@ -23,9 +24,13 @@ import java.util.Scanner;
  *       ({@code ExpandVirtualDisk} nativo, com o disco brevemente
  *       desanexado) e estende a particao ReFS ({@code Resize-Partition},
  *       online). Nao usa DISKPART.</li>
+ *   <li>{@code delete}: exclui permanentemente um Dev Drive ja existente -
+ *       desanexa o disco virtual e apaga o arquivo VHDX do disco fisico.
+ *       Irreversivel; exige confirmacao explicita a menos que
+ *       {@code --yes} seja passado.</li>
  * </ul>
  *
- * Ambos validam a letra de unidade antes e depois de cada etapa, por
+ * Todos validam a letra de unidade antes e depois de cada etapa, por
  * evidencia real do sistema de arquivos, e nunca confiam no texto
  * (localizavel) impresso pelas ferramentas do Windows.
  *
@@ -66,6 +71,9 @@ public class InstalaDevDrive {
         switch (cli.command()) {
             case RESIZE:
                 runResize(cli);
+                break;
+            case DELETE:
+                runDelete(cli);
                 break;
             case CREATE:
             default:
@@ -171,6 +179,46 @@ public class InstalaDevDrive {
                 + ": redimensionada com sucesso." + ANSI_RESET);
     }
 
+    private static void runDelete(CommandLineArgs cli) {
+        DevDriveDeleter deleter = new DevDriveDeleter();
+        DevDriveDeleter.Plan plan = deleter.resolvePlan(cli.letter());
+        VirtualDiskInfo info = deleter.inspect(plan);
+
+        System.out.println("=== InstalaDevDrive (delete) ===");
+        System.out.println("Unidade ..........: " + plan.driveLetter() + ":");
+        System.out.println("Arquivo VHDX .....: " + info.vhdxPath());
+        System.out.println("Tamanho ..........: " + SizeParser.toHumanReadable(info.diskSizeBytes()));
+        System.out.println();
+        System.out.println("ATENCAO: esta operacao APAGA PERMANENTEMENTE o arquivo VHDX acima e TODOS os");
+        System.out.println("dados da unidade " + plan.driveLetter() + ":. Nao ha como desfazer.");
+        System.out.println();
+
+        if (cli.dryRun()) {
+            System.out.println("(--dry-run) Nenhuma alteracao sera feita. As etapas seriam:");
+            System.out.println(" 0. Confirmar que " + plan.driveLetter()
+                    + ": e um Dev Drive (fsutil devdrv query - exige Administrador)");
+            System.out.println(" 1. Desanexar " + plan.driveLetter() + ": (a letra de unidade deixa de existir)");
+            System.out.println(" 2. Apagar o arquivo VHDX: " + info.vhdxPath());
+            return;
+        }
+
+        System.out.println("Verificando privilegios de Administrador...");
+        deleter.checkElevation();
+
+        if (!cli.assumeYes() && !confirm("A unidade " + plan.driveLetter() + ": e o arquivo VHDX serao "
+                + "PERMANENTEMENTE APAGADOS, com todos os dados. Esta acao NAO PODE ser desfeita. "
+                + "Continuar? [s/N]: ")) {
+            System.out.println("Operacao cancelada pelo usuario.");
+            return;
+        }
+
+        System.out.println("Excluindo o Dev Drive, aguarde...");
+        deleter.execute(plan, info);
+
+        System.out.println(ANSI_BRIGHT_GREEN + "Unidade " + plan.driveLetter()
+                + ": excluida com sucesso." + ANSI_RESET);
+    }
+
     private static void printProcessOutput(ProcessResult result) {
         if (!result.stdout().trim().isEmpty()) {
             System.out.print(result.stdout());
@@ -190,6 +238,8 @@ public class InstalaDevDrive {
     private static void printHelp(CommandLineArgs.Command command) {
         if (command == CommandLineArgs.Command.RESIZE) {
             printResizeHelp();
+        } else if (command == CommandLineArgs.Command.DELETE) {
+            printDeleteHelp();
         } else {
             printGeneralHelp();
         }
@@ -197,11 +247,12 @@ public class InstalaDevDrive {
 
     private static void printGeneralHelp() {
         System.out.println(
-                "InstalaDevDrive - cria e redimensiona um Dev Drive do Windows (unidade de desenvolvedor)\n"
+                "InstalaDevDrive - cria, redimensiona e exclui um Dev Drive do Windows (unidade de desenvolvedor)\n"
                 + "\n"
                 + "Uso:\n"
                 + "  java -jar InstalaDevDrive.jar [create] [opcoes]\n"
                 + "  java -jar InstalaDevDrive.jar resize --letter LETRA --size TAMANHO [opcoes]\n"
+                + "  java -jar InstalaDevDrive.jar delete --letter LETRA [opcoes]\n"
                 + "\n"
                 + "Sem verbo, assume 'create'.\n"
                 + "\n"
@@ -215,11 +266,14 @@ public class InstalaDevDrive {
                 + "  --letter LETRA   Letra do Dev Drive a aumentar (obrigatorio)\n"
                 + "  --size TAMANHO   Nova capacidade total, ex.: 100GB (obrigatorio; nao pode ser menor que a atual)\n"
                 + "\n"
+                + "Opcoes de 'delete':\n"
+                + "  --letter LETRA   Letra do Dev Drive a excluir (obrigatorio). APAGA o arquivo VHDX e todos os dados.\n"
+                + "\n"
                 + "Opcoes comuns:\n"
-                + "  --yes            Nao pedir confirmacao antes de alterar a unidade\n"
+                + "  --yes            Nao pedir confirmacao antes de alterar/excluir a unidade\n"
                 + "  --dry-run        Mostra o que seria feito, sem executar nenhuma alteracao\n"
                 + "  --verbose        Mostra (em outra cor) cada comando PowerShell / script DISKPART / fsutil executado\n"
-                + "  --help           Mostra esta ajuda ('resize --help' mostra os detalhes do resize)\n"
+                + "  --help           Mostra esta ajuda ('resize --help'/'delete --help' mostram os detalhes de cada um)\n"
                 + "\n"
                 + "Remontagem apos reiniciar: o disco e anexado de forma permanente via a\n"
                 + "Windows Virtual Disk API nativa (nao pelo DISKPART), entao ele volta\n"
@@ -254,6 +308,27 @@ public class InstalaDevDrive {
                 + "\n"
                 + "A operacao e idempotente: se algo falhar depois de o VHDX ja ter sido expandido,\n"
                 + "basta rodar o mesmo comando de novo para concluir.\n"
+        );
+    }
+
+    private static void printDeleteHelp() {
+        System.out.println(
+                "InstalaDevDrive delete - exclui permanentemente um Dev Drive ja existente\n"
+                + "\n"
+                + "Uso:\n"
+                + "  java -jar InstalaDevDrive.jar delete --letter LETRA [--yes] [--dry-run] [--verbose]\n"
+                + "\n"
+                + "  --letter LETRA   Letra do Dev Drive a excluir (ex.: E). A unidade tem que estar montada,\n"
+                + "                   ser um VHDX baseado em arquivo, usar ReFS e estar marcada como Dev Drive.\n"
+                + "\n"
+                + "ATENCAO: esta operacao e IRREVERSIVEL. O arquivo VHDX e apagado do disco junto com\n"
+                + "todos os dados da unidade. Sem --yes, e exigida confirmacao interativa antes de agir.\n"
+                + "\n"
+                + "O que acontece:\n"
+                + "  1. Descobre o arquivo VHDX por tras da letra (Get-Partition/Get-Disk, saida tipada).\n"
+                + "  2. Confirma que a unidade e mesmo um Dev Drive (fsutil devdrv query - exige Administrador).\n"
+                + "  3. Desanexa o disco virtual (a letra de unidade deixa de existir).\n"
+                + "  4. Apaga o arquivo VHDX do disco fisico.\n"
         );
     }
 }

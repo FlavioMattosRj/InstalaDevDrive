@@ -118,6 +118,60 @@ class CommandLineArgsTest {
         assertTrue(cli.verbose());
     }
 
+    // ---------------------------------------------------------------
+    // subcomando delete
+    // ---------------------------------------------------------------
+
+    @Test
+    void verboDeleteExigeLetra() {
+        CommandLineArgs cli = CommandLineArgs.parse(new String[]{"delete", "--letter", "e"});
+
+        assertEquals(CommandLineArgs.Command.DELETE, cli.command());
+        assertEquals(Character.valueOf('E'), cli.letter());
+    }
+
+    @Test
+    void deleteSemLetterEhRejeitado() {
+        assertThrows(IllegalArgumentException.class,
+                () -> CommandLineArgs.parse(new String[]{"delete"}));
+    }
+
+    @Test
+    void deleteComSizeEhRejeitado() {
+        assertThrows(IllegalArgumentException.class,
+                () -> CommandLineArgs.parse(new String[]{"delete", "--letter", "E", "--size", "100GB"}));
+    }
+
+    @Test
+    void deleteComNameEhRejeitado() {
+        assertThrows(IllegalArgumentException.class,
+                () -> CommandLineArgs.parse(new String[]{"delete", "--letter", "E", "--name", "Foo"}));
+    }
+
+    @Test
+    void deleteComPathEhRejeitado() {
+        assertThrows(IllegalArgumentException.class,
+                () -> CommandLineArgs.parse(new String[]{"delete", "--letter", "E", "--path", "C:\\X"}));
+    }
+
+    @Test
+    void deleteComHelpNaoExigeLetra() {
+        CommandLineArgs cli = CommandLineArgs.parse(new String[]{"delete", "--help"});
+
+        assertEquals(CommandLineArgs.Command.DELETE, cli.command());
+        assertTrue(cli.help());
+    }
+
+    @Test
+    void deleteAceitaFlagsComuns() {
+        CommandLineArgs cli = CommandLineArgs.parse(
+                new String[]{"delete", "--letter", "E", "--yes", "--dry-run", "--verbose"});
+
+        assertTrue(cli.assumeYes());
+        assertTrue(cli.dryRun());
+        assertTrue(cli.verbose());
+    }
+
     @Test
     void flagsBooleanasFormaLonga() {
         CommandLineArgs cli = CommandLineArgs.parse(new String[]{"--dry-run", "--yes", "--verbose", "--help"});
