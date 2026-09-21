@@ -3,16 +3,20 @@ package br.nom.mattos.flavio.instaladevdrive;
 import br.nom.mattos.flavio.instaladevdrive.cli.CommandLineArgs;
 import br.nom.mattos.flavio.instaladevdrive.core.DevDriveCreator;
 import br.nom.mattos.flavio.instaladevdrive.core.DevDriveDeleter;
+import br.nom.mattos.flavio.instaladevdrive.core.DevDriveEnvironment;
 import br.nom.mattos.flavio.instaladevdrive.core.DevDriveResizer;
 import br.nom.mattos.flavio.instaladevdrive.core.ProcessResult;
 import br.nom.mattos.flavio.instaladevdrive.core.SizeParser;
 import br.nom.mattos.flavio.instaladevdrive.core.VerboseLog;
 import br.nom.mattos.flavio.instaladevdrive.core.VirtualDiskInfo;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
 import java.util.Scanner;
 
 /**
- * Ponto de entrada do InstalaDevDrive. Dois subcomandos:
+ * Ponto de entrada do InstalaDevDrive. Três subcomandos:
  *
  * <ul>
  *   <li>{@code create} (padrao): cria um Dev Drive do Windows a partir de um
@@ -41,6 +45,7 @@ public class InstalaDevDrive {
     /** Caractere de escape ANSI (ASCII 27, 0x1B); prefixo de toda sequencia de cor. */
     private static final char ESC = 27;
     private static final String ANSI_BRIGHT_GREEN = ESC + "[92m";
+    private static final String ANSI_BRIGHT_YELLOW = ESC + "[93m";
     private static final String ANSI_RESET = ESC + "[0m";
 
     public static void main(String[] args) {
@@ -93,6 +98,9 @@ public class InstalaDevDrive {
         System.out.println("Letra de unidade .: " + plan.driveLetter() + ":");
         System.out.println("Tamanho ..........: " + SizeParser.toHumanReadable(plan.sizeBytes()));
         System.out.println();
+        EnvPrediction envPrediction = predictEnvironmentAfterCreateOrResize(plan.driveLetter());
+        printEnvPrediction(envPrediction);
+        System.out.println();
 
         if (cli.dryRun()) {
             System.out.println("(--dry-run) Nenhuma alteracao sera feita. As etapas seriam:");
@@ -101,6 +109,8 @@ public class InstalaDevDrive {
             System.out.println(" 3. Anexar o disco de forma permanente via Windows Virtual Disk API (sobrevive a reboots)");
             System.out.println(" 4. Criar particao e atribuir a letra " + plan.driveLetter() + ": via DISKPART");
             System.out.println(" 5. Formatar como Dev Drive (ReFS) via Format-Volume -DevDrive");
+            System.out.println(" 6. " + envPrediction.fieldLines().get(0));
+            System.out.println(" 7. " + envPrediction.fieldLines().get(1));
             return;
         }
 
@@ -121,6 +131,9 @@ public class InstalaDevDrive {
             throw new IllegalStateException("A criacao do Dev Drive falhou (codigo " + result.exitCode() + ").");
         }
 
+        updateEnvironmentAfterCreateOrResize(plan.driveLetter());
+
+        System.out.println();
         System.out.println(ANSI_BRIGHT_GREEN + "Dev Drive criado com sucesso." + ANSI_RESET);
     }
 
@@ -136,6 +149,9 @@ public class InstalaDevDrive {
         System.out.println("Capacidade atual .: " + SizeParser.toHumanReadable(info.diskSizeBytes()));
         System.out.println("Nova capacidade ..: " + SizeParser.toHumanReadable(plan.newSizeBytes()));
         System.out.println();
+        EnvPrediction envPrediction = predictEnvironmentAfterCreateOrResize(plan.driveLetter());
+        printEnvPrediction(envPrediction);
+        System.out.println();
 
         if (cli.dryRun()) {
             System.out.println("(--dry-run) Nenhuma alteracao sera feita. As etapas seriam:");
@@ -148,11 +164,15 @@ public class InstalaDevDrive {
                 System.out.println(" 3. Reanexar " + plan.driveLetter() + ": de forma permanente (sobrevive a reboots)");
                 System.out.println(" 4. Estender a particao ReFS para preencher o espaco novo (Resize-Partition)");
                 System.out.println(" 5. Confirmar via MSFT_Disk/MSFT_Volume que o tamanho aumentou");
+                System.out.println(" 6. " + envPrediction.fieldLines().get(0));
+                System.out.println(" 7. " + envPrediction.fieldLines().get(1));
             } else {
                 System.out.println(" 1. O VHDX ja tem " + SizeParser.toHumanReadable(info.diskSizeBytes())
                         + "; nao sera expandido nem desanexado.");
                 System.out.println(" 2. Estender a particao ReFS (online) para preencher qualquer espaco nao alocado");
                 System.out.println(" 3. Confirmar via MSFT_Volume que o tamanho nao regrediu");
+                System.out.println(" 4. " + envPrediction.fieldLines().get(0));
+                System.out.println(" 5. " + envPrediction.fieldLines().get(1));
             }
             return;
         }
@@ -175,6 +195,9 @@ public class InstalaDevDrive {
 
         printProcessOutput(result);
 
+        updateEnvironmentAfterCreateOrResize(plan.driveLetter());
+
+        System.out.println();
         System.out.println(ANSI_BRIGHT_GREEN + "Unidade " + plan.driveLetter()
                 + ": redimensionada com sucesso." + ANSI_RESET);
     }
@@ -189,8 +212,8 @@ public class InstalaDevDrive {
         System.out.println("Arquivo VHDX .....: " + info.vhdxPath());
         System.out.println("Tamanho ..........: " + SizeParser.toHumanReadable(info.diskSizeBytes()));
         System.out.println();
-        System.out.println("ATENCAO: esta operacao APAGA PERMANENTEMENTE o arquivo VHDX acima e TODOS os");
-        System.out.println("dados da unidade " + plan.driveLetter() + ":. Nao ha como desfazer.");
+        EnvPrediction envPrediction = predictEnvironmentAfterDelete(plan.driveLetter());
+        printEnvPrediction(envPrediction);
         System.out.println();
 
         if (cli.dryRun()) {
@@ -199,15 +222,17 @@ public class InstalaDevDrive {
                     + ": e um Dev Drive (fsutil devdrv query - exige Administrador)");
             System.out.println(" 1. Desanexar " + plan.driveLetter() + ": (a letra de unidade deixa de existir)");
             System.out.println(" 2. Apagar o arquivo VHDX: " + info.vhdxPath());
+            System.out.println(" 3. " + envPrediction.fieldLines().get(0));
+            System.out.println(" 4. " + envPrediction.fieldLines().get(1));
             return;
         }
 
         System.out.println("Verificando privilegios de Administrador...");
         deleter.checkElevation();
 
-        if (!cli.assumeYes() && !confirm("A unidade " + plan.driveLetter() + ": e o arquivo VHDX serao "
+        if (!cli.assumeYes() && !confirm(ANSI_BRIGHT_YELLOW + "A unidade " + plan.driveLetter() + ": e o arquivo VHDX serao "
                 + "PERMANENTEMENTE APAGADOS, com todos os dados. Esta acao NAO PODE ser desfeita. "
-                + "Continuar? [s/N]: ")) {
+                + "Continuar? [s/N]: " + ANSI_RESET)) {
             System.out.println("Operacao cancelada pelo usuario.");
             return;
         }
@@ -215,8 +240,203 @@ public class InstalaDevDrive {
         System.out.println("Excluindo o Dev Drive, aguarde...");
         deleter.execute(plan, info);
 
+        updateEnvironmentAfterDelete();
+
+        System.out.println();
         System.out.println(ANSI_BRIGHT_GREEN + "Unidade " + plan.driveLetter()
                 + ": excluida com sucesso." + ANSI_RESET);
+    }
+
+    /**
+     * Etapa final (melhor esforco) de create/resize: a letra do comando ja
+     * foi confirmada como Dev Drive pela propria operacao (formatacao no
+     * create, {@code requireDevDrive()} dentro do {@code execute()} no
+     * resize) - nao precisa reconfirmar via fsutil. So falta descobrir as
+     * OUTRAS unidades ativas na maquina para recalcular
+     * {@code DEVDRIVE_ROOTS} por completo.
+     */
+    private static void updateEnvironmentAfterCreateOrResize(char letter) {
+        List<DevDriveEnvironment.Candidate> outras = DevDriveEnvironment.confirmed(
+                DevDriveEnvironment.candidates(letter));
+
+        List<Character> roots = new ArrayList<>();
+        roots.add(letter);
+        for (DevDriveEnvironment.Candidate candidate : outras) {
+            roots.add(candidate.letter());
+        }
+
+        reportEnvironmentApply(DevDriveEnvironment.apply(letter + ":", roots));
+    }
+
+    /**
+     * Etapa final (melhor esforco) do delete: a unidade apagada ja nao esta
+     * montada, entao a varredura das remanescentes ja a exclui
+     * naturalmente. Sem "a unidade do comando" para virar HOME de graca (ela
+     * acabou de ser apagada), o desempate usa a unidade confirmada mais
+     * recentemente criada. Se nao sobrar nenhuma, as duas variaveis sao
+     * removidas.
+     */
+    private static void updateEnvironmentAfterDelete() {
+        List<DevDriveEnvironment.Candidate> confirmadas = DevDriveEnvironment.confirmed(
+                DevDriveEnvironment.candidates());
+
+        List<Character> roots = new ArrayList<>();
+        for (DevDriveEnvironment.Candidate candidate : confirmadas) {
+            roots.add(candidate.letter());
+        }
+
+        Optional<Character> novoHome = DevDriveEnvironment.mostRecentlyCreated(confirmadas);
+        String home = novoHome.map(letter -> letter + ":").orElse(null);
+        reportEnvironmentApply(DevDriveEnvironment.apply(home, roots));
+    }
+
+    /** Previsao de {@code DEVDRIVE_HOME}/{@code DEVDRIVE_ROOTS}, ja formatada para exibicao no plano. */
+    private static final class EnvPrediction {
+
+        private final List<String> fieldLines;
+        private final String note;
+
+        EnvPrediction(List<String> fieldLines, String note) {
+            this.fieldLines = fieldLines;
+            this.note = note;
+        }
+
+        /** Exatamente duas linhas, ja no formato "NOME .....: valor" - uma por variavel. */
+        List<String> fieldLines() {
+            return fieldLines;
+        }
+
+        /** Ressalva adicional (ex.: pendente de confirmacao apos elevacao); {@code null} se nao houver. */
+        String note() {
+            return note;
+        }
+    }
+
+    /**
+     * Previsao (sem elevacao) de {@code DEVDRIVE_HOME}/{@code DEVDRIVE_ROOTS}
+     * apos um {@code create}/{@code resize} bem sucedido: a letra do comando
+     * e certa (se a operacao falhar, nada disto e aplicado); as OUTRAS
+     * unidades encontradas via {@link DevDriveEnvironment#candidates(char...)}
+     * (CIM, sem elevacao) entram em {@code DEVDRIVE_ROOTS} com a ressalva de
+     * que so serao confirmadas de verdade (via {@code fsutil}) na execucao
+     * real, ja elevada.
+     */
+    private static EnvPrediction predictEnvironmentAfterCreateOrResize(char letra) {
+        List<DevDriveEnvironment.Candidate> outras = DevDriveEnvironment.candidates(letra);
+
+        List<Character> raizes = new ArrayList<>();
+        raizes.add(letra);
+        for (DevDriveEnvironment.Candidate candidate : outras) {
+            raizes.add(candidate.letter());
+        }
+        String rootsValue = DevDriveEnvironment.buildRootsValue(raizes);
+
+        List<String> fieldLines = List.of(
+                formatPlanField(DevDriveEnvironment.HOME_VARIABLE, letra + ":"),
+                formatPlanField(DevDriveEnvironment.ROOTS_VARIABLE, rootsValue));
+        String note = outras.isEmpty() ? null : "(as demais unidades serao confirmadas apos elevacao)";
+        return new EnvPrediction(fieldLines, note);
+    }
+
+    /**
+     * Previsao (sem elevacao) mostrada no plano/dry-run do delete: usa so o
+     * filtro barato (VirtualDiskInfo/CIM), ja que {@code fsutil} exige
+     * elevacao e {@code --dry-run} nunca eleva. Com 0 ou 1 candidato
+     * remanescente a previsao e exata; com 2 ou mais, o desempate por
+     * "criado mais recentemente" depende da confirmacao via {@code fsutil},
+     * que so acontece na execucao real.
+     */
+    private static EnvPrediction predictEnvironmentAfterDelete(char letraApagada) {
+        List<DevDriveEnvironment.Candidate> restantes = DevDriveEnvironment.candidates(letraApagada);
+
+        if (restantes.isEmpty()) {
+            List<String> fieldLines = List.of(
+                    formatPlanField(DevDriveEnvironment.HOME_VARIABLE, "(sera removida)"),
+                    formatPlanField(DevDriveEnvironment.ROOTS_VARIABLE, "(sera removida)"));
+            return new EnvPrediction(fieldLines, null);
+        }
+
+        List<Character> raizes = new ArrayList<>();
+        for (DevDriveEnvironment.Candidate candidate : restantes) {
+            raizes.add(candidate.letter());
+        }
+        String rootsValue = DevDriveEnvironment.buildRootsValue(raizes);
+
+        if (restantes.size() == 1) {
+            char unica = restantes.get(0).letter();
+            List<String> fieldLines = List.of(
+                    formatPlanField(DevDriveEnvironment.HOME_VARIABLE, unica + ":"),
+                    formatPlanField(DevDriveEnvironment.ROOTS_VARIABLE, rootsValue));
+            return new EnvPrediction(fieldLines, null);
+        }
+
+        List<String> fieldLines = List.of(
+                formatPlanField(DevDriveEnvironment.HOME_VARIABLE, "o mais novo entre " + joinLetters(raizes)),
+                formatPlanField(DevDriveEnvironment.ROOTS_VARIABLE, rootsValue));
+        return new EnvPrediction(fieldLines, "(sujeitas a confirmacao apos elevacao)");
+    }
+
+    /** Junta letras de unidade em uma lista legivel: "E:", "E: e K:" ou "E:, K: e M:". */
+    private static String joinLetters(List<Character> letras) {
+        StringBuilder texto = new StringBuilder();
+        for (int i = 0; i < letras.size(); i++) {
+            if (i > 0) {
+                texto.append(i == letras.size() - 1 ? " e " : ", ");
+            }
+            texto.append(letras.get(i)).append(':');
+        }
+        return texto.toString();
+    }
+
+    /**
+     * Formata um campo do plano no mesmo estilo das linhas fixas ("Nome/rotulo
+     * ......: valor"): rotulo, espaco, pontos ate a coluna 18 e ": valor" -
+     * sempre 20 colunas de prefixo, alinhando com o resto do bloco.
+     */
+    private static String formatPlanField(String label, String value) {
+        StringBuilder linha = new StringBuilder(label);
+        linha.append(' ');
+        while (linha.length() < 18) {
+            linha.append('.');
+        }
+        linha.append(": ").append(value);
+        return linha.toString();
+    }
+
+    /** Imprime o titulo "=== Variaveis de ambiente a modificar ===", os campos e a ressalva (se houver). */
+    private static void printEnvPrediction(EnvPrediction prediction) {
+        System.out.println("=== Variaveis de ambiente a modificar ===");
+        for (String linha : prediction.fieldLines()) {
+            System.out.println(linha);
+        }
+        if (prediction.note() != null) {
+            System.out.println(prediction.note());
+        }
+    }
+
+    /**
+     * Reporta o resultado da etapa final de {@code DEVDRIVE_HOME}/{@code
+     * DEVDRIVE_ROOTS}. Nunca lanca excecao nem falha o comando: a operacao
+     * principal no disco ja teve sucesso antes de chegar aqui - uma falha
+     * nesta etapa e so um aviso. Em sucesso, o bloco vem precedido de linha
+     * em branco e titulo verde, para separar claramente das mensagens da
+     * operacao principal que vieram antes.
+     */
+    private static void reportEnvironmentApply(DevDriveEnvironment.ApplyResult result) {
+        if (!result.success()) {
+            System.err.println("Aviso: nao foi possivel atualizar " + DevDriveEnvironment.HOME_VARIABLE
+                    + " automaticamente.");
+            System.err.println("Aviso: nao foi possivel atualizar " + DevDriveEnvironment.ROOTS_VARIABLE
+                    + " automaticamente.");
+            printProcessOutput(result.processResult());
+            return;
+        }
+        System.out.println();
+        System.out.println(ANSI_BRIGHT_GREEN + "Variaveis de ambiente ajustadas" + ANSI_RESET);
+        System.out.println(DevDriveEnvironment.HOME_VARIABLE + "="
+                + (result.home() == null ? "(removida)" : result.home()));
+        System.out.println(DevDriveEnvironment.ROOTS_VARIABLE + "="
+                + (result.rootsValue().isEmpty() ? "(removida)" : result.rootsValue()));
     }
 
     private static void printProcessOutput(ProcessResult result) {
