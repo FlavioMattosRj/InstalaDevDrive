@@ -19,7 +19,7 @@ public final class DriveLetterFinder {
     private DriveLetterFinder() {
     }
 
-    private static Set<Character> usedLetters() {
+    static Set<Character> usedLetters() {
         Set<Character> used = new HashSet<>();
         for (File root : File.listRoots()) {
             String path = root.getPath();

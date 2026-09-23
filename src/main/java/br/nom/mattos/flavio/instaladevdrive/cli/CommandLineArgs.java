@@ -22,7 +22,9 @@ public final class CommandLineArgs {
     public enum Command {
         CREATE,
         RESIZE,
-        DELETE;
+        DELETE,
+        MOUNT,
+        DISMOUNT;
 
         static Command parse(String token) {
             switch (token.toLowerCase()) {
@@ -32,9 +34,14 @@ public final class CommandLineArgs {
                     return RESIZE;
                 case "delete":
                     return DELETE;
+                case "mount":
+                    return MOUNT;
+                case "dismount":
+                    return DISMOUNT;
                 default:
                     throw new IllegalArgumentException(
-                            "Comando desconhecido: '" + token + "'. Use 'create', 'resize' ou 'delete'.");
+                            "Comando desconhecido: '" + token + "'. Use 'create', 'resize', 'delete', "
+                                    + "'mount' ou 'dismount'.");
             }
         }
     }
@@ -43,7 +50,7 @@ public final class CommandLineArgs {
     private String name = DEFAULT_NAME;
     private String size = DEFAULT_SIZE;
     private Character letter;
-    private Path directory;
+    private Path path;
     private boolean dryRun;
     private boolean assumeYes;
     private boolean help;
@@ -117,7 +124,7 @@ public final class CommandLineArgs {
                 }
                 case "path":
                     requireValuePresent(args, i, inlineValue, "path");
-                    result.directory = Paths.get(inlineValue != null ? inlineValue : args[++i]);
+                    result.path = Paths.get(inlineValue != null ? inlineValue : args[++i]);
                     break;
                 default:
                     throw new IllegalArgumentException("Argumento nao reconhecido: --" + key);
@@ -132,37 +139,85 @@ public final class CommandLineArgs {
      * Regras especificas de cada subcomando, aplicadas depois do parsing.
      * {@code resize} e {@code delete} identificam a unidade alvo por
      * {@code --letter} (obrigatorio nos dois); {@code resize} tambem exige
-     * {@code --size} (o novo tamanho total), enquanto {@code delete} nao
-     * aceita {@code --size} (a unidade inteira e removida, nao ha "novo
-     * tamanho" a informar). {@code --name} e {@code --path} sao insumos so
-     * da criacao e nao se aplicam a nenhum dos dois.
+     * {@code --size} (o novo tamanho total). {@code mount} identifica o
+     * VHDX por {@code --path} (obrigatorio - aqui e o ARQUIVO a montar, nao
+     * um diretorio como em {@code create}) e aceita {@code --letter} como
+     * pedido opcional. {@code dismount} identifica a unidade por {@code
+     * --letter} OU {@code --path} (exatamente um dos dois). {@code --name}
+     * e {@code --size} sao insumos so de {@code create}/{@code resize} e
+     * nao se aplicam aos demais.
      */
     private void validateForCommand() {
         if (help || command == Command.CREATE) {
             return;
         }
-        if (letter == null) {
-            throw new IllegalArgumentException(
-                    "O comando '" + commandToken() + "' exige --letter (a unidade a "
-                            + (command == Command.RESIZE ? "redimensionar" : "excluir") + ").");
-        }
-        if (command == Command.RESIZE && !sizeProvided) {
-            throw new IllegalArgumentException(
-                    "O comando 'resize' exige --size (o novo tamanho total da unidade).");
-        }
-        if (command == Command.DELETE && sizeProvided) {
-            throw new IllegalArgumentException("--size nao se aplica ao comando 'delete'.");
-        }
         if (nameProvided) {
             throw new IllegalArgumentException("--name nao se aplica ao comando '" + commandToken() + "'.");
         }
-        if (directory != null) {
+        if (sizeProvided && command != Command.RESIZE) {
+            throw new IllegalArgumentException("--size nao se aplica ao comando '" + commandToken() + "'.");
+        }
+
+        switch (command) {
+            case RESIZE:
+                requireLetter("redimensionar");
+                if (!sizeProvided) {
+                    throw new IllegalArgumentException(
+                            "O comando 'resize' exige --size (o novo tamanho total da unidade).");
+                }
+                requirePathAbsent();
+                break;
+            case DELETE:
+                requireLetter("excluir");
+                requirePathAbsent();
+                break;
+            case MOUNT:
+                if (path == null) {
+                    throw new IllegalArgumentException(
+                            "O comando 'mount' exige --path (o arquivo VHDX a montar).");
+                }
+                break;
+            case DISMOUNT:
+                if (letter == null && path == null) {
+                    throw new IllegalArgumentException(
+                            "O comando 'dismount' exige --letter ou --path (a unidade a desmontar).");
+                }
+                if (letter != null && path != null) {
+                    throw new IllegalArgumentException(
+                            "O comando 'dismount' aceita --letter OU --path, nao os dois.");
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
+    private void requireLetter(String acao) {
+        if (letter == null) {
+            throw new IllegalArgumentException(
+                    "O comando '" + commandToken() + "' exige --letter (a unidade a " + acao + ").");
+        }
+    }
+
+    private void requirePathAbsent() {
+        if (path != null) {
             throw new IllegalArgumentException("--path nao se aplica ao comando '" + commandToken() + "'.");
         }
     }
 
     private String commandToken() {
-        return command == Command.RESIZE ? "resize" : "delete";
+        switch (command) {
+            case RESIZE:
+                return "resize";
+            case DELETE:
+                return "delete";
+            case MOUNT:
+                return "mount";
+            case DISMOUNT:
+                return "dismount";
+            default:
+                return "create";
+        }
     }
 
     /**
@@ -193,8 +248,8 @@ public final class CommandLineArgs {
         return letter;
     }
 
-    public Path directory() {
-        return directory;
+    public Path path() {
+        return path;
     }
 
     public boolean dryRun() {

@@ -28,7 +28,7 @@ class CommandLineArgsTest {
         assertEquals(CommandLineArgs.DEFAULT_NAME, cli.name());
         assertEquals(CommandLineArgs.DEFAULT_SIZE, cli.size());
         assertNull(cli.letter());
-        assertNull(cli.directory());
+        assertNull(cli.path());
         assertFalse(cli.dryRun());
         assertFalse(cli.assumeYes());
         assertFalse(cli.help());
@@ -200,7 +200,7 @@ class CommandLineArgsTest {
         assertEquals("MeuDev", cli.name());
         assertEquals("100GB", cli.size());
         assertEquals(Character.valueOf('D'), cli.letter(), "Letra deve ser normalizada para maiuscula");
-        assertEquals(Paths.get("E:\\VHDs"), cli.directory());
+        assertEquals(Paths.get("E:\\VHDs"), cli.path());
     }
 
     @Test

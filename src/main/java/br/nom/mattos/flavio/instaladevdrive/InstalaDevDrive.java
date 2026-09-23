@@ -3,7 +3,9 @@ package br.nom.mattos.flavio.instaladevdrive;
 import br.nom.mattos.flavio.instaladevdrive.cli.CommandLineArgs;
 import br.nom.mattos.flavio.instaladevdrive.core.DevDriveCreator;
 import br.nom.mattos.flavio.instaladevdrive.core.DevDriveDeleter;
+import br.nom.mattos.flavio.instaladevdrive.core.DevDriveDismounter;
 import br.nom.mattos.flavio.instaladevdrive.core.DevDriveEnvironment;
+import br.nom.mattos.flavio.instaladevdrive.core.DevDriveMounter;
 import br.nom.mattos.flavio.instaladevdrive.core.DevDriveResizer;
 import br.nom.mattos.flavio.instaladevdrive.core.ProcessResult;
 import br.nom.mattos.flavio.instaladevdrive.core.SizeParser;
@@ -13,7 +15,7 @@ import br.nom.mattos.flavio.instaladevdrive.core.VirtualDiskInfo;
 import java.util.Scanner;
 
 /**
- * Ponto de entrada do InstalaDevDrive. Três subcomandos:
+ * Ponto de entrada do InstalaDevDrive. Cinco subcomandos:
  *
  * <ul>
  *   <li>{@code create} (padrao): cria um Dev Drive do Windows a partir de um
@@ -29,6 +31,15 @@ import java.util.Scanner;
  *       desanexa o disco virtual e apaga o arquivo VHDX do disco fisico.
  *       Irreversivel; exige confirmacao explicita a menos que
  *       {@code --yes} seja passado.</li>
+ *   <li>{@code mount}: (re)monta um Dev Drive ja existente a partir do seu
+ *       arquivo VHDX ({@code --path}) - anexa de forma permanente e, se
+ *       necessario, atribui/move a letra de unidade via DISKPART (nunca
+ *       particiona nem formata). So adota VHDX ja confirmados como Dev
+ *       Drive genuino.</li>
+ *   <li>{@code dismount}: desanexa um Dev Drive ja existente, identificado
+ *       por {@code --letter} ou {@code --path} - ao contrario do
+ *       {@code delete}, o arquivo VHDX NAO e apagado; a unidade pode ser
+ *       montada de novo depois com {@code mount}.</li>
  * </ul>
  *
  * Todos validam a letra de unidade antes e depois de cada etapa, por
@@ -77,6 +88,12 @@ public class InstalaDevDrive {
             case DELETE:
                 runDelete(cli);
                 break;
+            case MOUNT:
+                runMount(cli);
+                break;
+            case DISMOUNT:
+                runDismount(cli);
+                break;
             case CREATE:
             default:
                 runCreate(cli);
@@ -86,7 +103,7 @@ public class InstalaDevDrive {
 
     private static void runCreate(CommandLineArgs cli) {
         DevDriveCreator creator = new DevDriveCreator();
-        DevDriveCreator.Plan plan = creator.resolvePlan(cli.name(), cli.size(), cli.letter(), cli.directory());
+        DevDriveCreator.Plan plan = creator.resolvePlan(cli.name(), cli.size(), cli.letter(), cli.path());
         creator.validatePlan(plan);
 
         System.out.println("=== InstalaDevDrive (create) ===");
@@ -244,6 +261,106 @@ public class InstalaDevDrive {
                 + ": excluida com sucesso." + ANSI_RESET);
     }
 
+    private static void runMount(CommandLineArgs cli) {
+        DevDriveMounter mounter = new DevDriveMounter();
+        DevDriveMounter.Plan plan = mounter.resolvePlan(cli.path(), cli.letter());
+        DevDriveMounter.Inspection inspection = mounter.inspect(plan);
+        boolean jaMontada = inspection.alreadyMountedLetter() != null;
+
+        System.out.println("=== InstalaDevDrive (mount) ===");
+        System.out.println("Arquivo VHDX .....: " + plan.vhdxPath());
+        if (jaMontada) {
+            System.out.println("Letra de unidade .: " + inspection.alreadyMountedLetter() + ": (ja montada)");
+        } else if (plan.requestedLetter() != null) {
+            System.out.println("Letra de unidade .: " + plan.requestedLetter() + ": (pedida)");
+        } else {
+            System.out.println("Letra de unidade .: (restaurada automaticamente pelo Windows, ou a primeira livre)");
+        }
+        System.out.println();
+
+        Character letraConhecida = jaMontada ? inspection.alreadyMountedLetter() : plan.requestedLetter();
+        if (letraConhecida != null) {
+            printEnvPrediction(DevDriveEnvironment.predictAfterCreateOrResize(letraConhecida));
+            System.out.println();
+        }
+
+        if (cli.dryRun()) {
+            System.out.println("(--dry-run) Nenhuma alteracao sera feita. As etapas seriam:");
+            if (jaMontada) {
+                System.out.println(" 1. Confirmar que " + inspection.alreadyMountedLetter()
+                        + ": ja e um Dev Drive (fsutil devdrv query - exige Administrador)");
+                System.out.println(" 2. Nada mais a fazer - o VHDX ja esta montado.");
+            } else {
+                System.out.println(" 1. Anexar o VHDX de forma permanente via Windows Virtual Disk API (sobrevive a reboots)");
+                System.out.println(" 2. Verificar se uma letra apareceu sozinha (o Windows pode lembrar a letra de uma montagem anterior)");
+                System.out.println(" 3. Se nao apareceu, ou se e diferente da pedida, atribuir/mover a letra via DISKPART");
+                System.out.println(" 4. Confirmar que a unidade e mesmo um Dev Drive (fsutil devdrv query - exige Administrador)");
+            }
+            return;
+        }
+
+        System.out.println("Verificando privilegios de Administrador...");
+        mounter.checkElevation();
+
+        if (!jaMontada && !cli.assumeYes()
+                && !confirm("Esta operacao ira anexar o disco virtual de forma permanente (sobrevive a reboots). "
+                        + "Continuar? [s/N]: ")) {
+            System.out.println("Operacao cancelada pelo usuario.");
+            return;
+        }
+
+        System.out.println("Montando o Dev Drive, aguarde...");
+        char letter = mounter.execute(plan, inspection);
+
+        reportEnvironmentApply(DevDriveEnvironment.applyAfterCreateOrResize(letter));
+
+        System.out.println();
+        System.out.println(ANSI_BRIGHT_GREEN + "Unidade " + letter + ": montada com sucesso." + ANSI_RESET);
+    }
+
+    private static void runDismount(CommandLineArgs cli) {
+        DevDriveDismounter dismounter = new DevDriveDismounter();
+        DevDriveDismounter.Plan plan = dismounter.resolvePlan(cli.letter(), cli.path());
+        DevDriveDismounter.Target target = dismounter.inspect(plan);
+
+        System.out.println("=== InstalaDevDrive (dismount) ===");
+        System.out.println("Unidade ..........: " + target.letter() + ":");
+        System.out.println("Arquivo VHDX .....: " + target.info().vhdxPath());
+        System.out.println();
+        DevDriveEnvironment.Prediction envPrediction = DevDriveEnvironment.predictAfterDelete(target.letter());
+        printEnvPrediction(envPrediction);
+        System.out.println();
+
+        if (cli.dryRun()) {
+            System.out.println("(--dry-run) Nenhuma alteracao sera feita. As etapas seriam:");
+            System.out.println(" 0. Confirmar que " + target.letter()
+                    + ": e um Dev Drive (fsutil devdrv query - exige Administrador)");
+            System.out.println(" 1. Desanexar " + target.letter()
+                    + ": (a letra de unidade deixa de existir; o arquivo VHDX NAO e apagado)");
+            System.out.println(" 2. " + envPrediction.fieldLines().get(0));
+            System.out.println(" 3. " + envPrediction.fieldLines().get(1));
+            return;
+        }
+
+        System.out.println("Verificando privilegios de Administrador...");
+        dismounter.checkElevation();
+
+        if (!cli.assumeYes() && !confirm("Esta operacao ira DESANEXAR " + target.letter() + ": - a unidade fica "
+                + "indisponivel ate ser montada de novo (com 'mount').\nO arquivo VHDX NAO e apagado. Nada pode "
+                + "estar usando " + target.letter() + ": durante a operacao. Continuar? [s/N]: ")) {
+            System.out.println("Operacao cancelada pelo usuario.");
+            return;
+        }
+
+        System.out.println("Desmontando a unidade, aguarde...");
+        dismounter.execute(target);
+
+        reportEnvironmentApply(DevDriveEnvironment.applyAfterDelete());
+
+        System.out.println();
+        System.out.println(ANSI_BRIGHT_GREEN + "Unidade " + target.letter() + ": desmontada com sucesso." + ANSI_RESET);
+    }
+
     /**
      * Imprime o titulo "=== Variaveis de ambiente a modificar ===", os
      * campos (ja formatados por {@link DevDriveEnvironment}) e a ressalva
@@ -302,23 +419,36 @@ public class InstalaDevDrive {
     }
 
     private static void printHelp(CommandLineArgs.Command command) {
-        if (command == CommandLineArgs.Command.RESIZE) {
-            printResizeHelp();
-        } else if (command == CommandLineArgs.Command.DELETE) {
-            printDeleteHelp();
-        } else {
-            printGeneralHelp();
+        switch (command) {
+            case RESIZE:
+                printResizeHelp();
+                break;
+            case DELETE:
+                printDeleteHelp();
+                break;
+            case MOUNT:
+                printMountHelp();
+                break;
+            case DISMOUNT:
+                printDismountHelp();
+                break;
+            default:
+                printGeneralHelp();
+                break;
         }
     }
 
     private static void printGeneralHelp() {
         System.out.println(
-                "InstalaDevDrive - cria, redimensiona e exclui um Dev Drive do Windows (unidade de desenvolvedor)\n"
+                "InstalaDevDrive - cria, redimensiona, monta, desmonta e exclui um Dev Drive do Windows "
+                + "(unidade de desenvolvedor)\n"
                 + "\n"
                 + "Uso:\n"
                 + "  java -jar InstalaDevDrive.jar [create] [opcoes]\n"
                 + "  java -jar InstalaDevDrive.jar resize --letter LETRA --size TAMANHO [opcoes]\n"
                 + "  java -jar InstalaDevDrive.jar delete --letter LETRA [opcoes]\n"
+                + "  java -jar InstalaDevDrive.jar mount --path ARQUIVO.vhdx [--letter LETRA] [opcoes]\n"
+                + "  java -jar InstalaDevDrive.jar dismount (--letter LETRA | --path ARQUIVO.vhdx) [opcoes]\n"
                 + "\n"
                 + "Sem verbo, assume 'create'.\n"
                 + "\n"
@@ -335,11 +465,20 @@ public class InstalaDevDrive {
                 + "Opcoes de 'delete':\n"
                 + "  --letter LETRA   Letra do Dev Drive a excluir (obrigatorio). APAGA o arquivo VHDX e todos os dados.\n"
                 + "\n"
+                + "Opcoes de 'mount':\n"
+                + "  --path ARQUIVO   Caminho do arquivo .vhdx a montar (obrigatorio; aqui e o ARQUIVO, nao um diretorio)\n"
+                + "  --letter LETRA   Letra pedida (opcional; sem ela, aceita a letra restaurada pelo Windows\n"
+                + "                   ou a primeira livre)\n"
+                + "\n"
+                + "Opcoes de 'dismount':\n"
+                + "  --letter LETRA   Letra do Dev Drive a desmontar (--letter OU --path, nao os dois)\n"
+                + "  --path ARQUIVO   Caminho do arquivo .vhdx a desmontar, identificado pela letra atual dele\n"
+                + "\n"
                 + "Opcoes comuns:\n"
-                + "  --yes            Nao pedir confirmacao antes de alterar/excluir a unidade\n"
+                + "  --yes            Nao pedir confirmacao antes de alterar/montar/desmontar/excluir a unidade\n"
                 + "  --dry-run        Mostra o que seria feito, sem executar nenhuma alteracao\n"
                 + "  --verbose        Mostra (em outra cor) cada comando PowerShell / script DISKPART / fsutil executado\n"
-                + "  --help           Mostra esta ajuda ('resize --help'/'delete --help' mostram os detalhes de cada um)\n"
+                + "  --help           Mostra esta ajuda (ex.: 'mount --help' mostra os detalhes desse subcomando)\n"
                 + "\n"
                 + "Remontagem apos reiniciar: o disco e anexado de forma permanente via a\n"
                 + "Windows Virtual Disk API nativa (nao pelo DISKPART), entao ele volta\n"
@@ -395,6 +534,62 @@ public class InstalaDevDrive {
                 + "  2. Confirma que a unidade e mesmo um Dev Drive (fsutil devdrv query - exige Administrador).\n"
                 + "  3. Desanexa o disco virtual (a letra de unidade deixa de existir).\n"
                 + "  4. Apaga o arquivo VHDX do disco fisico.\n"
+        );
+    }
+
+    private static void printMountHelp() {
+        System.out.println(
+                "InstalaDevDrive mount - (re)monta um Dev Drive ja existente a partir do seu arquivo VHDX\n"
+                + "\n"
+                + "Uso:\n"
+                + "  java -jar InstalaDevDrive.jar mount --path ARQUIVO.vhdx [--letter LETRA] [--yes] [--dry-run] [--verbose]\n"
+                + "\n"
+                + "  --path ARQUIVO   Caminho do arquivo .vhdx a montar (obrigatorio).\n"
+                + "  --letter LETRA   Letra pedida para a unidade (opcional). Sem ela, aceita a letra que o\n"
+                + "                   Windows restaurar sozinho (ele lembra a letra de uma montagem anterior\n"
+                + "                   NESTA maquina) ou usa a primeira letra livre.\n"
+                + "\n"
+                + "O que acontece:\n"
+                + "  1. Se o VHDX ja estiver montado sob alguma letra, nao anexa de novo (o Windows nao "
+                + "permite\n"
+                + "     anexar duas vezes) - so confirma que aquela letra e mesmo um Dev Drive.\n"
+                + "  2. Caso contrario, anexa o VHDX de forma permanente via Windows Virtual Disk API "
+                + "(sobrevive\n"
+                + "     a reboots, mesma politica do 'create').\n"
+                + "  3. Se nenhuma letra apareceu sozinha, ou apareceu uma diferente da pedida, atribui/move "
+                + "a\n"
+                + "     letra via DISKPART (particao ja existente - este comando nunca particiona nem "
+                + "formata).\n"
+                + "  4. Confirma que a unidade e mesmo um Dev Drive (fsutil devdrv query - exige Administrador).\n"
+                + "\n"
+                + "Um VHDX sem nenhuma particao (nunca inicializado) nao pode ser montado por este comando -\n"
+                + "use 'create' para inicializar um Dev Drive novo. Se a letra pedida ja estiver em uso por\n"
+                + "outra unidade, ou se so a etapa de mover a letra falhar, a unidade permanece montada na\n"
+                + "letra que o Windows atribuiu, sem ser desanexada de novo.\n"
+        );
+    }
+
+    private static void printDismountHelp() {
+        System.out.println(
+                "InstalaDevDrive dismount - desanexa um Dev Drive ja existente, sem apagar o arquivo VHDX\n"
+                + "\n"
+                + "Uso:\n"
+                + "  java -jar InstalaDevDrive.jar dismount --letter LETRA [--yes] [--dry-run] [--verbose]\n"
+                + "  java -jar InstalaDevDrive.jar dismount --path ARQUIVO.vhdx [--yes] [--dry-run] [--verbose]\n"
+                + "\n"
+                + "  --letter LETRA   Letra do Dev Drive a desmontar.\n"
+                + "  --path ARQUIVO   Caminho do arquivo .vhdx a desmontar - a unidade tem que estar montada\n"
+                + "                   sob alguma letra no momento (por --path, o comando so encontra essa\n"
+                + "                   letra e reusa a mesma validacao de --letter). Use --letter OU --path,\n"
+                + "                   nunca os dois.\n"
+                + "\n"
+                + "Diferente de 'delete': o arquivo VHDX NAO e apagado, so a letra de unidade e removida. A\n"
+                + "unidade pode ser montada de novo depois com 'mount'.\n"
+                + "\n"
+                + "O que acontece:\n"
+                + "  1. Descobre o arquivo VHDX por tras da letra (Get-Partition/Get-Disk, saida tipada).\n"
+                + "  2. Confirma que a unidade e mesmo um Dev Drive (fsutil devdrv query - exige Administrador).\n"
+                + "  3. Desanexa o disco virtual (a letra de unidade deixa de existir; o arquivo VHDX permanece).\n"
         );
     }
 }
